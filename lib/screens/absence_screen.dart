@@ -131,17 +131,25 @@ class _AbsenceScreenState extends State<AbsenceScreen> {
               child: StreamBuilder<QuerySnapshot>(
                 stream: _db.collection('absences')
                   .where('userId', isEqualTo: user.uid)
-                  .orderBy('createdAt', descending: true)
                   .snapshots(),
                 builder: (context, snapshot) {
                   if (snapshot.connectionState == ConnectionState.waiting) {
                     return const Center(child: CircularProgressIndicator());
                   }
+                  if (snapshot.hasError) {
+                    return Center(child: Text("Error: ${snapshot.error}"));
+                  }
                   if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
                     return const Center(child: Text("No absences logged."));
                   }
 
-                  final docs = snapshot.data!.docs;
+                  final docs = snapshot.data!.docs
+                    ..sort((a, b) {
+                      final aTime = (a.data() as Map)['createdAt'];
+                      final bTime = (b.data() as Map)['createdAt'];
+                      if (aTime == null || bTime == null) return 0;
+                      return (bTime as Timestamp).compareTo(aTime as Timestamp);
+                    });
                   return ListView.builder(
                     itemCount: docs.length,
                     itemBuilder: (context, index) {
