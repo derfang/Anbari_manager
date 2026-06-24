@@ -17,6 +17,27 @@ class _AbsenceScreenState extends State<AbsenceScreen> {
   DateTime? _startDate;
   DateTime? _endDate;
   bool _isLoading = false;
+  bool _isAdmin = false;
+  String? _roomId;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUser();
+  }
+
+  Future<void> _loadUser() async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+    final doc = await _db.collection('users').doc(user.uid).get();
+    final data = doc.data() as Map<String, dynamic>?;
+    if (mounted) {
+      setState(() {
+        _roomId = data?['roomId'];
+        _isAdmin = data != null && (data['role'] == 'admin' || data['isAdmin'] == true);
+      });
+    }
+  }
 
   Future<void> _pickDateRange() async {
     final DateTimeRange? picked = await showDateRangePicker(
@@ -48,12 +69,11 @@ class _AbsenceScreenState extends State<AbsenceScreen> {
       if (user == null) throw Exception("User not logged in");
 
       final userDoc = await _db.collection('users').doc(user.uid).get();
-      final roomId = userDoc['roomId'];
 
       await _db.collection('absences').add({
         'userId': user.uid,
         'userName': userDoc['name'],
-        'roomId': roomId,
+        'roomId': _roomId ?? userDoc['roomId'],
         'startDate': Timestamp.fromDate(_startDate!),
         'endDate': Timestamp.fromDate(_endDate!),
         'status': 'pending',
@@ -125,13 +145,16 @@ class _AbsenceScreenState extends State<AbsenceScreen> {
               ),
             ),
             const SizedBox(height: 24),
-            const Text("My Absences", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            Text(
+              _isAdmin ? "All Absence Requests" : "My Absences",
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
             const SizedBox(height: 8),
             Expanded(
               child: StreamBuilder<QuerySnapshot>(
-                stream: _db.collection('absences')
-                  .where('userId', isEqualTo: user.uid)
-                  .snapshots(),
+                stream: _isAdmin
+                    ? _db.collection('absences').where('roomId', isEqualTo: _roomId).snapshots()
+                    : _db.collection('absences').where('userId', isEqualTo: user.uid).snapshots(),
                 builder: (context, snapshot) {
                   if (snapshot.connectionState == ConnectionState.waiting) {
                     return const Center(child: CircularProgressIndicator());
@@ -150,6 +173,7 @@ class _AbsenceScreenState extends State<AbsenceScreen> {
                       if (aTime == null || bTime == null) return 0;
                       return (bTime as Timestamp).compareTo(aTime as Timestamp);
                     });
+
                   return ListView.builder(
                     itemCount: docs.length,
                     itemBuilder: (context, index) {
@@ -157,7 +181,7 @@ class _AbsenceScreenState extends State<AbsenceScreen> {
                       final data = doc.data() as Map<String, dynamic>;
                       final start = (data['startDate'] as Timestamp).toDate();
                       final end = (data['endDate'] as Timestamp).toDate();
-                      final status = data['status'];
+                      final status = data['status'] as String;
 
                       return Card(
                         child: ListTile(
@@ -165,12 +189,16 @@ class _AbsenceScreenState extends State<AbsenceScreen> {
                             status == 'approved' ? Icons.check_circle : Icons.pending,
                             color: status == 'approved' ? Colors.green : Colors.orange,
                           ),
-                          title: Text("${DateFormat('MMM d').format(start)} - ${DateFormat('MMM d').format(end)}"),
+                          title: Text(_isAdmin
+                              ? "${data['userName']} · ${DateFormat('MMM d').format(start)} - ${DateFormat('MMM d').format(end)}"
+                              : "${DateFormat('MMM d').format(start)} - ${DateFormat('MMM d').format(end)}"),
                           subtitle: Text("Status: ${status.toUpperCase()}"),
-                          trailing: IconButton(
-                            icon: const Icon(Icons.delete, color: Colors.red),
-                            onPressed: () => doc.reference.delete(),
-                          ),
+                          trailing: _isAdmin
+                              ? IconButton(
+                                  icon: const Icon(Icons.delete, color: Colors.red),
+                                  onPressed: () => doc.reference.delete(),
+                                )
+                              : null,
                         ),
                       );
                     },
