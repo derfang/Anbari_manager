@@ -15,7 +15,7 @@ class _ManageChoresScreenState extends State<ManageChoresScreen> {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   
   String? _roomId;
-  String? _currentUserId;
+  bool _isAdmin = false;
   bool _isLoading = true;
 
   @override
@@ -24,15 +24,15 @@ class _ManageChoresScreenState extends State<ManageChoresScreen> {
     _loadUserRoom();
   }
 
-  // Fetch the current user's Room ID so we know which chores to load
   Future<void> _loadUserRoom() async {
     final user = _auth.currentUser;
     if (user != null) {
       final doc = await _db.collection('users').doc(user.uid).get();
       if (mounted) {
+        final data = doc.data() as Map<String, dynamic>?;
         setState(() {
           _roomId = doc['roomId'];
-          _currentUserId = user.uid;
+          _isAdmin = data != null && (data['role'] == 'admin' || data['isAdmin'] == true);
           _isLoading = false;
         });
       }
@@ -131,11 +131,7 @@ class _ManageChoresScreenState extends State<ManageChoresScreen> {
                     };
 
                     if (existingChore == null) {
-                      // Create new — record who created it
-                      await _db.collection('chores').add({
-                        ...choreData,
-                        'createdBy': _currentUserId,
-                      });
+                      await _db.collection('chores').add(choreData);
                     } else {
                       // Update existing
                       await _db.collection('chores').doc(existingChore.id).update(choreData);
@@ -162,11 +158,13 @@ class _ManageChoresScreenState extends State<ManageChoresScreen> {
 
     return Scaffold(
       appBar: AppBar(title: const Text("Manage Chores")),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _showChoreDialog(),
-        icon: const Icon(Icons.add),
-        label: const Text("Add Task"),
-      ),
+      floatingActionButton: _isAdmin
+          ? FloatingActionButton.extended(
+              onPressed: () => _showChoreDialog(),
+              icon: const Icon(Icons.add),
+              label: const Text("Add Task"),
+            )
+          : null,
       body: StreamBuilder<QuerySnapshot>(
         // Listen to the database in real-time for chores in this room
         stream: _db.collection('chores').where('roomId', isEqualTo: _roomId).snapshots(),
@@ -188,30 +186,24 @@ class _ManageChoresScreenState extends State<ManageChoresScreen> {
                 child: ListTile(
                   title: Text(chore['title'], style: const TextStyle(fontWeight: FontWeight.bold)),
                   subtitle: Text("${chore['points']} pts • ${chore['crew']} person crew • Every ${chore['frequencyDays']} days"),
-                  trailing: Builder(
-                    builder: (context) {
-                      final data = chore.data() as Map<String, dynamic>;
-                      final createdBy = data['createdBy'] as String?;
-                      final isCreator = createdBy == null || createdBy == _currentUserId;
-                      if (!isCreator) return const SizedBox.shrink();
-                      return Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          IconButton(
-                            icon: const Icon(Icons.edit, color: Colors.blue),
-                            onPressed: () => _showChoreDialog(existingChore: chore),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.delete, color: Colors.red),
-                            onPressed: () async {
-                              await _db.collection('chores').doc(chore.id).delete();
-                              await ChoreService().recalculateSchedule(_roomId!);
-                            },
-                          ),
-                        ],
-                      );
-                    },
-                  ),
+                  trailing: _isAdmin
+                      ? Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.edit, color: Colors.blue),
+                              onPressed: () => _showChoreDialog(existingChore: chore),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.delete, color: Colors.red),
+                              onPressed: () async {
+                                await _db.collection('chores').doc(chore.id).delete();
+                                await ChoreService().recalculateSchedule(_roomId!);
+                              },
+                            ),
+                          ],
+                        )
+                      : null,
                 ),
               );
             },
