@@ -387,6 +387,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         child: DataTable(
                           border: TableBorder.all(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(8)),
                           headingRowColor: WidgetStateProperty.all(Colors.teal.withOpacity(0.1)),
+                          columnSpacing: 0,
+                          horizontalMargin: 12,
                           columns: [
                             const DataColumn(label: Text('Chore', style: TextStyle(fontWeight: FontWeight.bold))),
                             // Generate columns dynamically for Sat -> Fri
@@ -416,7 +418,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                     return DataCell(
                                       Container(
                                         width: double.infinity,
-                                        color: isDone ? Colors.green.shade200 : null,
+                                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                                        color: isDone ? Colors.green.shade300 : null,
                                         alignment: Alignment.center,
                                         child: Text(
                                           assignedName,
