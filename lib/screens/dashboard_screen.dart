@@ -290,7 +290,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 final pendingReports = snapshot.data!.docs.where((doc) {
                   final data = doc.data() as Map<String, dynamic>;
                   final approvals = List<String>.from(data['approvals'] ?? []);
-                  return !approvals.contains(currentUid);
+                  final ignored = List<String>.from(data['ignored'] ?? []);
+                  return !approvals.contains(currentUid) && !ignored.contains(currentUid);
                 }).toList();
                 if (pendingReports.isEmpty) return const SizedBox.shrink();
 
@@ -302,6 +303,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       leading: const Icon(Icons.flag, color: Colors.red),
                       content: Text("\"${data['choreTitle']}\" on ${data['dayOfWeek']} was reported as falsely done."),
                       actions: [
+                        TextButton(
+                          onPressed: () async {
+                            final approvals = List<String>.from(data['approvals'] ?? []);
+                            final ignored = List<String>.from(data['ignored'] ?? []);
+                            await doc.reference.update({'ignored': [...ignored, currentUid!]});
+                          },
+                          child: const Text("IGNORE"),
+                        ),
                         TextButton(
                           onPressed: () async {
                             final approvals = List<String>.from(data['approvals'] ?? []);
