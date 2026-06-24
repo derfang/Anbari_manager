@@ -124,9 +124,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
           )
         ],
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
+      body: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // --- SECTION 0: Pending Absences ---
@@ -188,14 +189,55 @@ class _DashboardScreenState extends State<DashboardScreen> {
             
             StreamBuilder<QuerySnapshot>(
               stream: _db.collection('assignments')
-                .where('assignedToUserId', isEqualTo: _auth.currentUser?.uid)
-                .where('isCompleted', isEqualTo: false)
+                .where('roomId', isEqualTo: _roomId)
                 .snapshots(),
               builder: (context, snapshot) {
+                if (snapshot.hasError) {
+                  return Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Text("Error loading chores: ${snapshot.error}", style: const TextStyle(color: Colors.red)),
+                  );
+                }
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
                 }
-                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                
+                final currentWeekBounds = _choreService.getWeekBounds(0);
+                final startBounds = currentWeekBounds[0];
+                final endBounds = currentWeekBounds[1];
+
+                final allTasks = snapshot.hasData ? snapshot.data!.docs : [];
+                var myTasks = allTasks.where((doc) {
+                  try {
+                    final data = doc.data() as Map<String, dynamic>;
+                    if (data['assignedToUserId'] != _auth.currentUser?.uid) return false;
+                    if (data['isCompleted'] == true) return false;
+
+                    final date = (data['date'] as Timestamp).toDate();
+                    return date.compareTo(startBounds) >= 0 && date.compareTo(endBounds) <= 0;
+                  } catch (e) {
+                    return false;
+                  }
+                }).toList();
+
+                // Sort by date ascending
+                myTasks.sort((a, b) {
+                  final dateA = (a['date'] as Timestamp).toDate();
+                  final dateB = (b['date'] as Timestamp).toDate();
+                  return dateA.compareTo(dateB);
+                });
+
+                // Deduplicate by choreId
+                final seenChores = <String>{};
+                myTasks = myTasks.where((doc) {
+                  final data = doc.data() as Map<String, dynamic>;
+                  final choreId = data['choreId'] as String;
+                  if (seenChores.contains(choreId)) return false;
+                  seenChores.add(choreId);
+                  return true;
+                }).toList();
+
+                if (myTasks.isEmpty) {
                   return const Card(
                     child: Padding(
                       padding: EdgeInsets.all(16.0),
@@ -204,7 +246,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   );
                 }
 
-                final myTasks = snapshot.data!.docs;
                 return Column(
                   children: myTasks.map((doc) {
                     final data = doc.data() as Map<String, dynamic>;
@@ -214,24 +255,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       builder: (context, setBtnState) {
                         return Card(
                           elevation: 2,
+                          margin: const EdgeInsets.only(bottom: 12),
                           child: ListTile(
                             leading: const Icon(Icons.cleaning_services, size: 36, color: Colors.teal),
-                            title: Text(data['choreId'], style: const TextStyle(fontWeight: FontWeight.w600)),
+                            title: Text(data['choreTitle'] ?? data['choreId'], style: const TextStyle(fontWeight: FontWeight.w600)),
                             subtitle: Text("Due: ${data['dayOfWeek'] ?? data['day']}"),
                             trailing: FilledButton(
                               onPressed: isSubmitting ? null : () async {
                                 setBtnState(() => isSubmitting = true);
                                 try {
-                                  // Mark as complete via chore service which distributes zero-sum points
                                   await _choreService.completeChore(
                                     roomId: _roomId!,
                                     choreId: data['choreId'],
                                     doerIds: [data['assignedToUserId']],
                                   );
-                                  // Also mark the assignment doc as completed so it disappears
                                   await doc.reference.update({'isCompleted': true});
                                 } catch (e) {
-                                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
+                                  if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
                                 }
                                 if (context.mounted) setBtnState(() => isSubmitting = false);
                               },
@@ -282,10 +322,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ),
             
             // The Interactive Grid Matrix
-            Expanded(
-              child: StreamBuilder<QuerySnapshot>(
-                // Stream 1: Listen for the list of available chores in this room
-                stream: _db.collection('chores').where('roomId', isEqualTo: _roomId).snapshots(),
+            StreamBuilder<QuerySnapshot>(
+              // Stream 1: Listen for the list of available chores in this room
+              stream: _db.collection('chores').where('roomId', isEqualTo: _roomId).snapshots(),
                 builder: (context, choreSnapshot) {
                   if (!choreSnapshot.hasData) {
                     return const Center(child: CircularProgressIndicator());
@@ -345,34 +384,32 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
                       return SingleChildScrollView(
                         scrollDirection: Axis.horizontal,
-                        child: SingleChildScrollView(
-                          scrollDirection: Axis.vertical,
-                          child: DataTable(
-                            border: TableBorder.all(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(8)),
-                            headingRowColor: WidgetStateProperty.all(Colors.teal.withOpacity(0.1)),
-                            columns: [
-                              const DataColumn(label: Text('Chore', style: TextStyle(fontWeight: FontWeight.bold))),
-                              // Generate columns dynamically for Sat -> Fri
-                              ..._weekDays.map((day) => DataColumn(
-                                    label: Text(day.substring(0, 3), style: const TextStyle(fontWeight: FontWeight.bold)),
-                                  )),
-                            ],
-                            rows: chores.map((chore) {
-                              return DataRow(
-                                cells: [
-                                  DataCell(
-                                    Column(
-                                      mainAxisAlignment: MainAxisAlignment.center,
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(chore['title'], style: const TextStyle(fontWeight: FontWeight.w600)),
-                                        Text("${chore['points']} pts", style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
-                                      ],
-                                    ),
+                        child: DataTable(
+                          border: TableBorder.all(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(8)),
+                          headingRowColor: WidgetStateProperty.all(Colors.teal.withOpacity(0.1)),
+                          columns: [
+                            const DataColumn(label: Text('Chore', style: TextStyle(fontWeight: FontWeight.bold))),
+                            // Generate columns dynamically for Sat -> Fri
+                            ..._weekDays.map((day) => DataColumn(
+                                  label: Text(day.substring(0, 3), style: const TextStyle(fontWeight: FontWeight.bold)),
+                                )),
+                          ],
+                          rows: chores.map((chore) {
+                            return DataRow(
+                              cells: [
+                                DataCell(
+                                  Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(chore['title'], style: const TextStyle(fontWeight: FontWeight.w600)),
+                                      Text("${chore['points']} pts", style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+                                    ],
                                   ),
-                                  // Generate the inner cells intersecting chores with days
-                                  ..._weekDays.map((day) {
-                                    String lookupKey = "${chore['title']}_$day";
+                                ),
+                                // Generate the inner cells intersecting chores with days
+                                ..._weekDays.map((day) {
+                                  String lookupKey = "${chore.id}_$day";
                                     String assignedName = assignmentMap[lookupKey] ?? '-';
                                     bool isDone = completionMap[lookupKey] ?? false;
 
@@ -402,15 +439,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               );
                             }).toList(),
                           ),
-                        ),
                       );
                     },
                   );
                 },
               ),
-            ),
           ],
         ),
+      ),
       ),
     );
   }

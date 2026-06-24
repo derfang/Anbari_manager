@@ -108,8 +108,7 @@ class ChoreService {
 
         if (doerIds.contains(doc.id)) {
           doers.add(doc);
-        } else if (data['isAbsent'] == false) {
-          // FIXED: Removed null check and cast
+        } else if (data['isAbsent'] != true) {
           presentSlackers.add(doc);
         }
       }
@@ -250,7 +249,8 @@ class ChoreService {
             final assignmentRef = _db.collection('assignments').doc();
             batch.set(assignmentRef, {
               'roomId': roomId,
-              'choreId': chore['title'], 
+              'choreId': chore['id'], 
+              'choreTitle': chore['title'],
               'assignedToUserId': assignedUser['id'],
               'assignedToName': assignedUser['name'],
               'day': dayString,
