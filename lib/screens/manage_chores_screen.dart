@@ -15,6 +15,7 @@ class _ManageChoresScreenState extends State<ManageChoresScreen> {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   
   String? _roomId;
+  String? _currentUserId;
   bool _isLoading = true;
 
   @override
@@ -31,6 +32,7 @@ class _ManageChoresScreenState extends State<ManageChoresScreen> {
       if (mounted) {
         setState(() {
           _roomId = doc['roomId'];
+          _currentUserId = user.uid;
           _isLoading = false;
         });
       }
@@ -129,8 +131,11 @@ class _ManageChoresScreenState extends State<ManageChoresScreen> {
                     };
 
                     if (existingChore == null) {
-                      // Create new
-                      await _db.collection('chores').add(choreData);
+                      // Create new — record who created it
+                      await _db.collection('chores').add({
+                        ...choreData,
+                        'createdBy': _currentUserId,
+                      });
                     } else {
                       // Update existing
                       await _db.collection('chores').doc(existingChore.id).update(choreData);
@@ -183,21 +188,29 @@ class _ManageChoresScreenState extends State<ManageChoresScreen> {
                 child: ListTile(
                   title: Text(chore['title'], style: const TextStyle(fontWeight: FontWeight.bold)),
                   subtitle: Text("${chore['points']} pts • ${chore['crew']} person crew • Every ${chore['frequencyDays']} days"),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.edit, color: Colors.blue),
-                        onPressed: () => _showChoreDialog(existingChore: chore),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.delete, color: Colors.red),
-                        onPressed: () async {
-                          await _db.collection('chores').doc(chore.id).delete();
-                          await ChoreService().recalculateSchedule(_roomId!);
-                        },
-                      ),
-                    ],
+                  trailing: Builder(
+                    builder: (context) {
+                      final data = chore.data() as Map<String, dynamic>;
+                      final createdBy = data['createdBy'] as String?;
+                      final isCreator = createdBy == null || createdBy == _currentUserId;
+                      if (!isCreator) return const SizedBox.shrink();
+                      return Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.edit, color: Colors.blue),
+                            onPressed: () => _showChoreDialog(existingChore: chore),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.delete, color: Colors.red),
+                            onPressed: () async {
+                              await _db.collection('chores').doc(chore.id).delete();
+                              await ChoreService().recalculateSchedule(_roomId!);
+                            },
+                          ),
+                        ],
+                      );
+                    },
                   ),
                 ),
               );
