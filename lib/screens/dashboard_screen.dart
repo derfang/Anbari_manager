@@ -413,23 +413,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                     String assignedName = assignmentMap[lookupKey] ?? '-';
                                     bool isDone = completionMap[lookupKey] ?? false;
 
-                                    Color textColor;
-                                    if (assignedName == '-') {
-                                      textColor = Colors.grey;
-                                    } else if (isDone) {
-                                      textColor = Colors.green.shade700;
-                                    } else {
-                                      textColor = Colors.teal.shade700;
-                                    }
-
                                     return DataCell(
-                                      Center(
+                                      Container(
+                                        width: double.infinity,
+                                        color: isDone ? Colors.green.shade200 : null,
+                                        alignment: Alignment.center,
                                         child: Text(
                                           assignedName,
                                           style: TextStyle(
                                             fontSize: 13,
                                             fontWeight: assignedName != '-' ? FontWeight.bold : FontWeight.normal,
-                                            color: textColor,
+                                            color: assignedName != '-' ? Colors.teal.shade700 : Colors.grey,
                                           ),
                                         ),
                                       ),
