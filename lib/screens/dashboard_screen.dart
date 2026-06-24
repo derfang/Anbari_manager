@@ -429,6 +429,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                     doerIds: [data['assignedToUserId']],
                                   );
                                   await doc.reference.update({'isCompleted': true});
+                                  // Clear any existing reports so a fresh report can be filed
+                                  final oldReports = await _db.collection('reports')
+                                      .where('assignmentId', isEqualTo: doc.id)
+                                      .get();
+                                  for (final r in oldReports.docs) {
+                                    await r.reference.delete();
+                                  }
                                 } catch (e) {
                                   if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
                                 }
