@@ -278,6 +278,56 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 );
               },
             ),
+            // --- SECTION 0b: Pending False-Completion Reports ---
+            StreamBuilder<QuerySnapshot>(
+              stream: _db.collection('reports')
+                .where('roomId', isEqualTo: _roomId)
+                .where('status', isEqualTo: 'pending')
+                .snapshots(),
+              builder: (context, snapshot) {
+                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) return const SizedBox.shrink();
+                final currentUid = _auth.currentUser?.uid;
+                final pendingReports = snapshot.data!.docs.where((doc) {
+                  final data = doc.data() as Map<String, dynamic>;
+                  final approvals = List<String>.from(data['approvals'] ?? []);
+                  return !approvals.contains(currentUid);
+                }).toList();
+                if (pendingReports.isEmpty) return const SizedBox.shrink();
+
+                return Column(
+                  children: pendingReports.map((doc) {
+                    final data = doc.data() as Map<String, dynamic>;
+                    return MaterialBanner(
+                      backgroundColor: Colors.red.shade50,
+                      leading: const Icon(Icons.flag, color: Colors.red),
+                      content: Text("\"${data['choreTitle']}\" on ${data['dayOfWeek']} was reported as falsely done."),
+                      actions: [
+                        TextButton(
+                          onPressed: () async {
+                            final approvals = List<String>.from(data['approvals'] ?? []);
+                            final newApprovals = [...approvals, currentUid!];
+                            await doc.reference.update({'approvals': newApprovals});
+
+                            final usersSnap = await _db.collection('users').where('roomId', isEqualTo: _roomId).get();
+                            final threshold = (usersSnap.docs.length * 2 / 3).ceil();
+                            if (newApprovals.length >= threshold) {
+                              await _undoAssignment(data['assignmentId']);
+                              await doc.reference.update({'status': 'resolved'});
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text("Report approved! \"${data['choreTitle']}\" marked as undone.")),
+                                );
+                              }
+                            }
+                          },
+                          child: const Text("APPROVE"),
+                        ),
+                      ],
+                    );
+                  }).toList(),
+                );
+              },
+            ),
             const SizedBox(height: 12),
 
             // --- SECTION 1: Personal Tasks ---
