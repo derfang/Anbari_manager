@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'create_room_screen.dart';
@@ -24,23 +25,36 @@ class _AuthScreenState extends State<AuthScreen> {
     }
 
     try {
-      // 1. Initialize the new Google Sign-In instance
-      await GoogleSignIn.instance.initialize();
-      
-      // 2. Trigger the new Authentication flow
-      final GoogleSignInAccount? googleUser = await GoogleSignIn.instance.authenticate();
-      if (googleUser == null) return; // User canceled the sign-in
+      UserCredential userCred;
 
-      // 3. Obtain the auth details (No 'await' needed in v7)
-      final GoogleSignInAuthentication googleAuth = googleUser.authentication;
+      if (kIsWeb) {
+        // On Web, Firebase has built-in popup support which avoids the new Google Identity Services button requirement
+        GoogleAuthProvider authProvider = GoogleAuthProvider();
+        userCred = await _auth.signInWithPopup(authProvider);
+      } else {
+        // 1. Initialize the new Google Sign-In instance (handle if already initialized)
+        try {
+          await GoogleSignIn.instance.initialize();
+        } catch (e) {
+          // Ignored if already initialized
+        }
+        
+        // 2. Trigger the new Authentication flow
+        final GoogleSignInAccount? googleUser = await GoogleSignIn.instance.authenticate();
+        if (googleUser == null) return; // User canceled the sign-in
 
-      // 4. Create the Firebase credential (accessToken is no longer needed!)
-      final AuthCredential credential = GoogleAuthProvider.credential(
-        idToken: googleAuth.idToken,
-      );
+        // 3. Obtain the auth details
+        final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
 
-      // 5. Sign in to Firebase
-      UserCredential userCred = await _auth.signInWithCredential(credential);
+        // 4. Create the Firebase credential
+        final AuthCredential credential = GoogleAuthProvider.credential(
+          idToken: googleAuth.idToken,
+        );
+
+        // 5. Sign in to Firebase
+        userCred = await _auth.signInWithCredential(credential);
+      }
+
       String currentUserId = userCred.user!.uid;
 
       if (!mounted) return;

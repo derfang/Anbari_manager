@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../services/chore_service.dart';
 import 'dashboard_screen.dart';
 
 class JoinRoomScreen extends StatefulWidget {
@@ -51,6 +52,9 @@ class _JoinRoomScreenState extends State<JoinRoomScreen> {
         'isAbsent': false,
       });
 
+      // 4. Recalculate the current week so the new user gets chores immediately
+      await ChoreService().recalculateWeek(roomId);
+
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Successfully joined the room!")),
@@ -71,24 +75,96 @@ class _JoinRoomScreenState extends State<JoinRoomScreen> {
     }
   }
 
+  final TextEditingController _roomIdController = TextEditingController();
+  final TextEditingController _passwordController = TextEditingController();
+  bool _showScanner = true;
+
+  @override
+  void dispose() {
+    _roomIdController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _manualJoin() async {
+    final roomId = _roomIdController.text.trim();
+    final password = _passwordController.text.trim();
+
+    if (roomId.isEmpty || password.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Please enter both Room ID and Password.")));
+      return;
+    }
+
+    await _processScannedCode("$roomId|$password");
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("Scan Room QR")),
+      appBar: AppBar(
+        title: Text(_showScanner ? "Scan Room QR" : "Enter Room Code"),
+        actions: [
+          TextButton(
+            onPressed: () => setState(() => _showScanner = !_showScanner),
+            child: Text(_showScanner ? "Manual Entry" : "Scan QR", style: const TextStyle(color: Colors.white)),
+          )
+        ],
+      ),
       body: Stack(
         children: [
-          MobileScanner(
-            onDetect: (capture) {
-              final List<Barcode> barcodes = capture.barcodes;
-              for (final barcode in barcodes) {
-                if (barcode.rawValue != null) {
-                  _processScannedCode(barcode.rawValue!);
-                  break; // Stop scanning once we get a hit
+          if (_showScanner)
+            MobileScanner(
+              onDetect: (capture) {
+                final List<Barcode> barcodes = capture.barcodes;
+                for (final barcode in barcodes) {
+                  if (barcode.rawValue != null) {
+                    _processScannedCode(barcode.rawValue!);
+                    break;
+                  }
                 }
-              }
-            },
-          ),
-          if (_isProcessing) const Center(child: CircularProgressIndicator()),
+              },
+            )
+          else
+            Padding(
+              padding: const EdgeInsets.all(24.0),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.meeting_room, size: 80, color: Colors.teal),
+                  const SizedBox(height: 24),
+                  const Text("Join via Code", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  const Text("Enter the Room ID and Password provided by your Admin.", textAlign: TextAlign.center, style: TextStyle(color: Colors.grey)),
+                  const SizedBox(height: 32),
+                  TextField(
+                    controller: _roomIdController,
+                    decoration: const InputDecoration(labelText: "Room ID", border: OutlineInputBorder()),
+                    enabled: !_isProcessing,
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: _passwordController,
+                    decoration: const InputDecoration(labelText: "Password", border: OutlineInputBorder()),
+                    enabled: !_isProcessing,
+                  ),
+                  const SizedBox(height: 24),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton(
+                      onPressed: _isProcessing ? null : _manualJoin,
+                      style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16)),
+                      child: const Text("Join Room"),
+                    ),
+                  )
+                ],
+              ),
+            ),
+          
+          if (_isProcessing) 
+            Container(
+              color: Colors.black54,
+              child: const Center(child: CircularProgressIndicator()),
+            ),
         ],
       ),
     );

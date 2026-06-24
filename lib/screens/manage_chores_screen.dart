@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../services/chore_service.dart';
 
 class ManageChoresScreen extends StatefulWidget {
   const ManageChoresScreen({super.key});
@@ -43,7 +44,7 @@ class _ManageChoresScreenState extends State<ManageChoresScreen> {
     );
     double effortPoints = existingChore != null ? (existingChore['points'] as num).toDouble() : 1.0;
     int crewNeeded = existingChore != null ? existingChore['crew'] : 1;
-    String frequency = existingChore != null ? existingChore['frequency'] : 'Weekly';
+    int frequencyDays = existingChore != null ? existingChore['frequencyDays'] : 7;
 
     showDialog(
       context: context,
@@ -95,15 +96,15 @@ class _ManageChoresScreenState extends State<ManageChoresScreen> {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         const Text("Frequency:"),
-                        DropdownButton<String>(
-                          value: frequency,
-                          items: ['Daily', 'Weekly', 'Bi-Weekly', 'Monthly'].map((String value) {
-                            return DropdownMenuItem<String>(
-                              value: value,
-                              child: Text(value),
-                            );
-                          }).toList(),
-                          onChanged: (val) => setDialogState(() => frequency = val!),
+                        DropdownButton<int>(
+                          value: frequencyDays,
+                          items: const [
+                            DropdownMenuItem(value: 1, child: Text("Daily (1 day)")),
+                            DropdownMenuItem(value: 3, child: Text("Every 3 Days")),
+                            DropdownMenuItem(value: 7, child: Text("Weekly (7 days)")),
+                            DropdownMenuItem(value: 14, child: Text("Bi-Weekly (14 days)")),
+                          ],
+                          onChanged: (val) => setDialogState(() => frequencyDays = val!),
                         ),
                       ],
                     ),
@@ -124,7 +125,7 @@ class _ManageChoresScreenState extends State<ManageChoresScreen> {
                       'title': titleController.text.trim(),
                       'points': effortPoints,
                       'crew': crewNeeded,
-                      'frequency': frequency,
+                      'frequencyDays': frequencyDays,
                     };
 
                     if (existingChore == null) {
@@ -134,6 +135,10 @@ class _ManageChoresScreenState extends State<ManageChoresScreen> {
                       // Update existing
                       await _db.collection('chores').doc(existingChore.id).update(choreData);
                     }
+                    
+                    // Auto-recalculate the current week's schedule
+                    await ChoreService().recalculateWeek(_roomId!);
+
                     if (context.mounted) Navigator.pop(context);
                   },
                   child: const Text("Save"),
@@ -177,7 +182,7 @@ class _ManageChoresScreenState extends State<ManageChoresScreen> {
                 margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 child: ListTile(
                   title: Text(chore['title'], style: const TextStyle(fontWeight: FontWeight.bold)),
-                  subtitle: Text("${chore['points']} pts • ${chore['crew']} person crew • ${chore['frequency']}"),
+                  subtitle: Text("${chore['points']} pts • ${chore['crew']} person crew • Every ${chore['frequencyDays']} days"),
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -187,7 +192,10 @@ class _ManageChoresScreenState extends State<ManageChoresScreen> {
                       ),
                       IconButton(
                         icon: const Icon(Icons.delete, color: Colors.red),
-                        onPressed: () => _db.collection('chores').doc(chore.id).delete(),
+                        onPressed: () async {
+                          await _db.collection('chores').doc(chore.id).delete();
+                          await ChoreService().recalculateWeek(_roomId!);
+                        },
                       ),
                     ],
                   ),

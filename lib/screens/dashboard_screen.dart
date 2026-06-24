@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:intl/intl.dart';
 import 'manage_chores_screen.dart';
 import 'auth_screen.dart';
+import 'absence_screen.dart';
+import 'room_settings_screen.dart';
+import '../services/chore_service.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -14,9 +18,12 @@ class DashboardScreen extends StatefulWidget {
 class _DashboardScreenState extends State<DashboardScreen> {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
+  final ChoreService _choreService = ChoreService();
   
   String? _roomId;
   bool _isLoading = true;
+  bool _isAdmin = false;
+  int _weekOffset = 0;
 
   // The custom regional week layout (Saturday to Friday)
   final List<String> _weekDays = [
@@ -43,6 +50,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
       if (mounted) {
         setState(() {
           _roomId = doc['roomId'];
+          final data = doc.data() as Map<String, dynamic>?;
+          _isAdmin = data != null && (data['role'] == 'admin' || data['isAdmin'] == true);
           _isLoading = false;
         });
       }
@@ -71,6 +80,31 @@ class _DashboardScreenState extends State<DashboardScreen> {
       appBar: AppBar(
         title: const Text("Apartment Dashboard"),
         actions: [
+          if (_isAdmin)
+            IconButton(
+              icon: const Icon(Icons.calendar_month),
+              tooltip: "Regenerate Schedule for Viewed Week",
+              onPressed: () async {
+                setState(() => _isLoading = true);
+                try {
+                  await _choreService.recalculateWeek(_roomId!, _weekOffset);
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Schedule generated for the selected week!")));
+                } catch (e) {
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error generating schedule: $e")));
+                }
+                if (mounted) setState(() => _isLoading = false);
+              },
+            ),
+          IconButton(
+            icon: const Icon(Icons.flight_takeoff),
+            tooltip: "Absences",
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const AbsenceScreen()),
+              );
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.settings),
             tooltip: "Manage Chores",
@@ -81,6 +115,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
               );
             },
           ),
+          if (_isAdmin)
+            IconButton(
+              icon: const Icon(Icons.group),
+              tooltip: "Room Settings",
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const RoomSettingsScreen()),
+                );
+              },
+            ),
           IconButton(
             icon: const Icon(Icons.logout),
             tooltip: "Logout",
@@ -93,6 +138,56 @@ class _DashboardScreenState extends State<DashboardScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // --- SECTION 0: Pending Absences ---
+            StreamBuilder<QuerySnapshot>(
+              stream: _db.collection('absences')
+                .where('roomId', isEqualTo: _roomId)
+                .where('status', isEqualTo: 'pending')
+                .snapshots(),
+              builder: (context, snapshot) {
+                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) return const SizedBox.shrink();
+                final pendingDocs = snapshot.data!.docs.where((doc) => (doc.data() as Map<String, dynamic>)['userId'] != _auth.currentUser?.uid).toList();
+                if (pendingDocs.isEmpty) return const SizedBox.shrink();
+
+                return Column(
+                  children: pendingDocs.map((doc) {
+                    final data = doc.data() as Map<String, dynamic>;
+                    final start = (data['startDate'] as Timestamp).toDate();
+                    final end = (data['endDate'] as Timestamp).toDate();
+                    return MaterialBanner(
+                      backgroundColor: Colors.orange.shade100,
+                      leading: const Icon(Icons.notification_important, color: Colors.orange),
+                      content: Text("${data['userName']} requested absence from ${start.month}/${start.day} to ${end.month}/${end.day}."),
+                      actions: [
+                        TextButton(
+                          onPressed: () async {
+                            try {
+                              await _choreService.approveAbsenceAndRecalculate(
+                                absenceDocRef: doc.reference,
+                                roomId: _roomId!,
+                                currentUserId: _auth.currentUser!.uid,
+                                startDate: start,
+                                endDate: end,
+                              );
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Absence approved and schedule updated!")));
+                              }
+                            } catch (e) {
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
+                              }
+                            }
+                          },
+                          child: const Text("APPROVE"),
+                        ),
+                      ],
+                    );
+                  }).toList(),
+                );
+              },
+            ),
+            const SizedBox(height: 12),
+
             // --- SECTION 1: Personal Tasks ---
             const Text(
               "My Chores This Week",
@@ -100,27 +195,100 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ),
             const SizedBox(height: 12),
             
-            // Temporary static card until we wire up the personal assignment filter
-            Card(
-              elevation: 2,
-              child: ListTile(
-                leading: const Icon(Icons.delete_outline, size: 36, color: Colors.teal),
-                title: const Text("Take out the Trash", style: TextStyle(fontWeight: FontWeight.w600)),
-                subtitle: const Text("Due: Wednesday"),
-                trailing: FilledButton(
-                  onPressed: () {},
-                  child: const Text("Done"),
-                ),
-              ),
+            StreamBuilder<QuerySnapshot>(
+              stream: _db.collection('assignments')
+                .where('assignedToUserId', isEqualTo: _auth.currentUser?.uid)
+                .where('isCompleted', isEqualTo: false)
+                .snapshots(),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                  return const Card(
+                    child: Padding(
+                      padding: EdgeInsets.all(16.0),
+                      child: Text("You have no pending chores! Time to relax on the couch. 🛋️"),
+                    ),
+                  );
+                }
+
+                final myTasks = snapshot.data!.docs;
+                return Column(
+                  children: myTasks.map((doc) {
+                    final data = doc.data() as Map<String, dynamic>;
+                    bool isSubmitting = false;
+
+                    return StatefulBuilder(
+                      builder: (context, setBtnState) {
+                        return Card(
+                          elevation: 2,
+                          child: ListTile(
+                            leading: const Icon(Icons.cleaning_services, size: 36, color: Colors.teal),
+                            title: Text(data['choreId'], style: const TextStyle(fontWeight: FontWeight.w600)),
+                            subtitle: Text("Due: ${data['dayOfWeek'] ?? data['day']}"),
+                            trailing: FilledButton(
+                              onPressed: isSubmitting ? null : () async {
+                                setBtnState(() => isSubmitting = true);
+                                try {
+                                  // Mark as complete via chore service which distributes zero-sum points
+                                  await _choreService.completeChore(
+                                    roomId: _roomId!,
+                                    choreId: data['choreId'],
+                                    doerIds: [data['assignedToUserId']],
+                                  );
+                                  // Also mark the assignment doc as completed so it disappears
+                                  await doc.reference.update({'isCompleted': true});
+                                } catch (e) {
+                                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
+                                }
+                                if (context.mounted) setBtnState(() => isSubmitting = false);
+                              },
+                              child: isSubmitting 
+                                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) 
+                                : const Text("Done"),
+                            ),
+                          ),
+                        );
+                      }
+                    );
+                  }).toList(),
+                );
+              },
             ),
             const SizedBox(height: 24),
 
             // --- SECTION 2: The Room Matrix ---
-            const Text(
-              "Saturday-to-Friday Matrix",
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            Builder(
+              builder: (context) {
+                final bounds = _choreService.getWeekBounds(_weekOffset);
+                final startFormat = DateFormat('MMM d').format(bounds[0]);
+                final endFormat = DateFormat('MMM d').format(bounds[1]);
+
+                return Column(
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.chevron_left), 
+                          onPressed: () => setState(() => _weekOffset--),
+                        ),
+                        Text(
+                          "Matrix: $startFormat - $endFormat",
+                          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.chevron_right), 
+                          onPressed: () => setState(() => _weekOffset++),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                );
+              }
             ),
-            const SizedBox(height: 12),
             
             // The Interactive Grid Matrix
             Expanded(
@@ -145,19 +313,57 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   }
 
                   return StreamBuilder<QuerySnapshot>(
-                    // Stream 2: Listen for the actual assignments linking people to chores
-                    stream: _db.collection('assignments').where('roomId', isEqualTo: _roomId).snapshots(),
+                    // Stream 2: Listen for the actual assignments (filtered locally to avoid index errors)
+                    stream: _db.collection('assignments')
+                        .where('roomId', isEqualTo: _roomId)
+                        .snapshots(),
                     builder: (context, assignmentSnapshot) {
                       if (!assignmentSnapshot.hasData) {
                         return const Center(child: CircularProgressIndicator());
                       }
 
-                      final assignments = assignmentSnapshot.data!.docs;
+                      final startBounds = _choreService.getWeekBounds(_weekOffset)[0];
+                      final endBounds = _choreService.getWeekBounds(_weekOffset)[1];
+                      
+                      final assignments = assignmentSnapshot.data!.docs.where((doc) {
+                        try {
+                          final date = (doc['date'] as Timestamp).toDate();
+                          return date.compareTo(startBounds) >= 0 && date.compareTo(endBounds) <= 0;
+                        } catch (e) {
+                          return false;
+                        }
+                      }).toList();
 
-                      // Helper map to lookup assignment names quickly: "choreId_day" -> "Roommate Name"
+                      if (assignments.isEmpty) {
+                        return Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Text("No chores scheduled for this week.", style: TextStyle(color: Colors.grey, fontSize: 16)),
+                              const SizedBox(height: 16),
+                              if (_isAdmin)
+                                FilledButton.icon(
+                                  icon: const Icon(Icons.calendar_month),
+                                  label: const Text("Generate Schedule"),
+                                  onPressed: () async {
+                                    setState(() => _isLoading = true);
+                                    try {
+                                      await _choreService.recalculateWeek(_roomId!, _weekOffset);
+                                    } catch (e) {
+                                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
+                                    }
+                                    if (mounted) setState(() => _isLoading = false);
+                                  },
+                                )
+                            ],
+                          ),
+                        );
+                      }
+
+                      // Helper map to lookup assignment names quickly: "choreId_dayOfWeek" -> "Roommate Name"
                       Map<String, String> assignmentMap = {};
                       for (var doc in assignments) {
-                        String key = "${doc['choreId']}_${doc['day']}";
+                        String key = "${doc['choreId']}_${doc['dayOfWeek']}";
                         assignmentMap[key] = doc['assignedToName'] ?? 'Unassigned';
                       }
 
@@ -190,7 +396,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   ),
                                   // Generate the inner cells intersecting chores with days
                                   ..._weekDays.map((day) {
-                                    String lookupKey = "${chore.id}_$day";
+                                    String lookupKey = "${chore['title']}_$day";
                                     String assignedName = assignmentMap[lookupKey] ?? '-';
                                     
                                     return DataCell(

@@ -32,10 +32,10 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
   // Inject a starter pack of chores into the database for this new room
   Future<void> _generateDefaultChores(String roomId) async {
     final List<Map<String, dynamic>> defaultTasks = [
-      {'title': 'Take out the Trash', 'points': 1.0, 'crew': 1, 'frequency': 'Weekly', 'roomId': roomId},
-      {'title': 'Clean the Bathroom', 'points': 3.0, 'crew': 1, 'frequency': 'Weekly', 'roomId': roomId},
-      {'title': 'Sweep & Mop Floors', 'points': 2.0, 'crew': 1, 'frequency': 'Weekly', 'roomId': roomId},
-      {'title': 'Wipe Kitchen Counters', 'points': 1.0, 'crew': 1, 'frequency': 'Daily', 'roomId': roomId},
+      {'title': 'Take out the Trash', 'points': 1.0, 'crew': 1, 'frequencyDays': 7, 'roomId': roomId},
+      {'title': 'Clean the Bathroom', 'points': 3.0, 'crew': 1, 'frequencyDays': 7, 'roomId': roomId},
+      {'title': 'Sweep & Mop Floors', 'points': 2.0, 'crew': 1, 'frequencyDays': 7, 'roomId': roomId},
+      {'title': 'Wipe Kitchen Counters', 'points': 1.0, 'crew': 1, 'frequencyDays': 1, 'roomId': roomId},
     ];
 
     final batch = _db.batch();
@@ -61,11 +61,13 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
 
     try {
       final String roomId = _generateRoomCode();
+      final String roomPassword = _generateRoomCode();
 
       // 1. Create the master room entry
       await _db.collection('rooms').doc(roomId).set({
         'id': roomId,
         'name': roomName,
+        'password': roomPassword,
         'creatorId': widget.creatorId,
         'createdAt': FieldValue.serverTimestamp(),
       });
@@ -76,6 +78,7 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
         'name': widget.creatorName,
         'roomId': roomId,
         'role': 'admin',
+        'isAdmin': true, // Add this explicitly for Firestore rules
         'joinedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
 
