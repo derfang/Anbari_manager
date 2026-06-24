@@ -18,10 +18,39 @@ class ChoreService {
     return [startOfWeek, endOfWeek];
   }
 
-  Future<void> recalculateWeek(String roomId, [int weekOffset = 0]) async {
-    final bounds = getWeekBounds(weekOffset);
-    final startDate = bounds[0];
-    final endDate = bounds[1];
+  Future<void> cleanOldAssignments(String roomId) async {
+    final bounds = getWeekBounds(-1); // Keep the previous week, delete anything older
+    final pastSaturday = bounds[0];
+    
+    try {
+      final assignmentsSnapshot = await _db.collection('assignments')
+          .where('roomId', isEqualTo: roomId)
+          .get();
+
+      final batch = _db.batch();
+      for (var doc in assignmentsSnapshot.docs) {
+        try {
+          final date = (doc.data()['date'] as Timestamp).toDate();
+          if (date.compareTo(pastSaturday) < 0) {
+            batch.delete(doc.reference);
+          }
+        } catch (_) {}
+      }
+      await batch.commit();
+      debugPrint("Old assignments garbage collected.");
+    } catch (e) {
+      debugPrint("Error cleaning old assignments: $e");
+    }
+  }
+
+  Future<void> recalculateSchedule(String roomId) async {
+    await cleanOldAssignments(roomId);
+
+    final currentBounds = getWeekBounds(0);
+    final nextBounds = getWeekBounds(1);
+    
+    final startDate = currentBounds[0]; 
+    final endDate = nextBounds[1];      
 
     try {
       final assignmentsSnapshot = await _db.collection('assignments')
@@ -46,7 +75,7 @@ class ChoreService {
         endDate: endDate,
       );
     } catch (e) {
-      debugPrint("Error recalculating current week: $e");
+      debugPrint("Error recalculating schedule: $e");
       rethrow;
     }
   }
@@ -260,29 +289,8 @@ class ChoreService {
         'approvedBy': currentUserId,
       });
 
-      // 2. Find and delete uncompleted assignments in this window
-      final assignmentsSnapshot = await _db.collection('assignments')
-          .where('roomId', isEqualTo: roomId)
-          .where('isCompleted', isEqualTo: false)
-          .get();
-
-      final batch = _db.batch();
-      for (var doc in assignmentsSnapshot.docs) {
-        try {
-          final date = (doc.data()['date'] as Timestamp).toDate();
-          if (date.compareTo(startDate) >= 0 && date.compareTo(endDate) <= 0) {
-            batch.delete(doc.reference);
-          }
-        } catch (_) {}
-      }
-      await batch.commit();
-
-      // 3. Re-generate schedule for this window
-      await generateWeeklySchedule(
-        roomId: roomId,
-        startDate: startDate,
-        endDate: endDate,
-      );
+      // 2. Re-generate schedule for this window
+      await recalculateSchedule(roomId);
 
       debugPrint("Absence approved and schedule recalculated!");
     } catch (e) {
@@ -303,29 +311,8 @@ class ChoreService {
         'roomId': '',
       });
 
-      // 2. Find and delete uncompleted assignments in this window
-      final assignmentsSnapshot = await _db.collection('assignments')
-          .where('roomId', isEqualTo: roomId)
-          .where('isCompleted', isEqualTo: false)
-          .get();
-
-      final batch = _db.batch();
-      for (var doc in assignmentsSnapshot.docs) {
-        try {
-          final date = (doc.data()['date'] as Timestamp).toDate();
-          if (date.compareTo(startDate) >= 0 && date.compareTo(endDate) <= 0) {
-            batch.delete(doc.reference);
-          }
-        } catch (_) {}
-      }
-      await batch.commit();
-
-      // 3. Re-generate schedule for this window without the kicked user
-      await generateWeeklySchedule(
-        roomId: roomId,
-        startDate: startDate,
-        endDate: endDate,
-      );
+      // 2. Re-generate schedule
+      await recalculateSchedule(roomId);
 
       debugPrint("User removed and schedule recalculated!");
     } catch (e) {

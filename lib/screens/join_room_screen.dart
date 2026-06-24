@@ -52,8 +52,8 @@ class _JoinRoomScreenState extends State<JoinRoomScreen> {
         'isAbsent': false,
       });
 
-      // 4. Recalculate the current week so the new user gets chores immediately
-      await ChoreService().recalculateWeek(roomId);
+      // 4. Recalculate the schedule so the new user gets chores immediately
+      await ChoreService().recalculateSchedule(roomId);
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

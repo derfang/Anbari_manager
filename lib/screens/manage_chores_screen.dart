@@ -136,8 +136,8 @@ class _ManageChoresScreenState extends State<ManageChoresScreen> {
                       await _db.collection('chores').doc(existingChore.id).update(choreData);
                     }
                     
-                    // Auto-recalculate the current week's schedule
-                    await ChoreService().recalculateWeek(_roomId!);
+                    // Auto-recalculate the schedule
+                    await ChoreService().recalculateSchedule(_roomId!);
 
                     if (context.mounted) Navigator.pop(context);
                   },
@@ -194,7 +194,7 @@ class _ManageChoresScreenState extends State<ManageChoresScreen> {
                         icon: const Icon(Icons.delete, color: Colors.red),
                         onPressed: () async {
                           await _db.collection('chores').doc(chore.id).delete();
-                          await ChoreService().recalculateWeek(_roomId!);
+                          await ChoreService().recalculateSchedule(_roomId!);
                         },
                       ),
                     ],

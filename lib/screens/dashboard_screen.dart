@@ -54,6 +54,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
           _isAdmin = data != null && (data['role'] == 'admin' || data['isAdmin'] == true);
           _isLoading = false;
         });
+        
+        // Background cleanup of old weeks
+        if (_roomId != null && _roomId!.isNotEmpty) {
+          _choreService.cleanOldAssignments(_roomId!);
+        }
       }
     }
   }
@@ -80,21 +85,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       appBar: AppBar(
         title: const Text("Apartment Dashboard"),
         actions: [
-          if (_isAdmin)
-            IconButton(
-              icon: const Icon(Icons.calendar_month),
-              tooltip: "Regenerate Schedule for Viewed Week",
-              onPressed: () async {
-                setState(() => _isLoading = true);
-                try {
-                  await _choreService.recalculateWeek(_roomId!, _weekOffset);
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Schedule generated for the selected week!")));
-                } catch (e) {
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error generating schedule: $e")));
-                }
-                if (mounted) setState(() => _isLoading = false);
-              },
-            ),
+          // Removed manual calendar generation icon as schedule generation is now fully automated
           IconButton(
             icon: const Icon(Icons.flight_takeoff),
             tooltip: "Absences",
@@ -272,7 +263,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       children: [
                         IconButton(
                           icon: const Icon(Icons.chevron_left), 
-                          onPressed: () => setState(() => _weekOffset--),
+                          onPressed: _weekOffset > -1 ? () => setState(() => _weekOffset--) : null,
                         ),
                         Text(
                           "Matrix: $startFormat - $endFormat",
@@ -280,7 +271,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         ),
                         IconButton(
                           icon: const Icon(Icons.chevron_right), 
-                          onPressed: () => setState(() => _weekOffset++),
+                          onPressed: _weekOffset < 1 ? () => setState(() => _weekOffset++) : null,
                         ),
                       ],
                     ),
@@ -335,27 +326,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       }).toList();
 
                       if (assignments.isEmpty) {
-                        return Center(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              const Text("No chores scheduled for this week.", style: TextStyle(color: Colors.grey, fontSize: 16)),
-                              const SizedBox(height: 16),
-                              if (_isAdmin)
-                                FilledButton.icon(
-                                  icon: const Icon(Icons.calendar_month),
-                                  label: const Text("Generate Schedule"),
-                                  onPressed: () async {
-                                    setState(() => _isLoading = true);
-                                    try {
-                                      await _choreService.recalculateWeek(_roomId!, _weekOffset);
-                                    } catch (e) {
-                                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
-                                    }
-                                    if (mounted) setState(() => _isLoading = false);
-                                  },
-                                )
-                            ],
+                        return const Center(
+                          child: Padding(
+                            padding: EdgeInsets.all(16.0),
+                            child: Text("No chores scheduled for this week.", style: TextStyle(color: Colors.grey, fontSize: 16)),
                           ),
                         );
                       }
