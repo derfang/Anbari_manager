@@ -94,21 +94,14 @@ class _ManageChoresScreenState extends State<ManageChoresScreen> {
                       ],
                     ),
 
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text("Frequency:"),
-                        DropdownButton<int>(
-                          value: frequencyDays,
-                          items: const [
-                            DropdownMenuItem(value: 1, child: Text("Daily (1 day)")),
-                            DropdownMenuItem(value: 3, child: Text("Every 3 Days")),
-                            DropdownMenuItem(value: 7, child: Text("Weekly (7 days)")),
-                            DropdownMenuItem(value: 14, child: Text("Bi-Weekly (14 days)")),
-                          ],
-                          onChanged: (val) => setDialogState(() => frequencyDays = val!),
-                        ),
-                      ],
+                    Text("Frequency: Every $frequencyDays day${frequencyDays > 1 ? 's' : ''}"),
+                    Slider(
+                      value: frequencyDays.toDouble(),
+                      min: 1,
+                      max: 14,
+                      divisions: 13,
+                      label: "$frequencyDays",
+                      onChanged: (val) => setDialogState(() => frequencyDays = val.round()),
                     ),
                   ],
                 ),
