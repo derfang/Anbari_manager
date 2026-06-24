@@ -334,11 +334,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         );
                       }
 
-                      // Helper map to lookup assignment names quickly: "choreId_dayOfWeek" -> "Roommate Name"
+                      // Helper maps: "choreId_dayOfWeek" -> name / isCompleted
                       Map<String, String> assignmentMap = {};
+                      Map<String, bool> completionMap = {};
                       for (var doc in assignments) {
                         String key = "${doc['choreId']}_${doc['dayOfWeek']}";
                         assignmentMap[key] = doc['assignedToName'] ?? 'Unassigned';
+                        completionMap[key] = doc['isCompleted'] == true;
                       }
 
                       return SingleChildScrollView(
@@ -372,7 +374,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   ..._weekDays.map((day) {
                                     String lookupKey = "${chore['title']}_$day";
                                     String assignedName = assignmentMap[lookupKey] ?? '-';
-                                    
+                                    bool isDone = completionMap[lookupKey] ?? false;
+
+                                    Color textColor;
+                                    if (assignedName == '-') {
+                                      textColor = Colors.grey;
+                                    } else if (isDone) {
+                                      textColor = Colors.green.shade700;
+                                    } else {
+                                      textColor = Colors.teal.shade700;
+                                    }
+
                                     return DataCell(
                                       Center(
                                         child: Text(
@@ -380,7 +392,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                           style: TextStyle(
                                             fontSize: 13,
                                             fontWeight: assignedName != '-' ? FontWeight.bold : FontWeight.normal,
-                                            color: assignedName != '-' ? Colors.teal.shade700 : Colors.grey,
+                                            color: textColor,
                                           ),
                                         ),
                                       ),
