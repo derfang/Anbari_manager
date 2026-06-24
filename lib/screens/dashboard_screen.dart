@@ -513,7 +513,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 ),
                                 // Generate the inner cells intersecting chores with days
                                 ..._weekDays.map((day) {
-                                    final String lookupKey = "${chore['title']}_$day";
+                                    final String lookupKey = "${chore.id}_$day";
                                     final String assignedName = assignmentMap[lookupKey] ?? '-';
                                     final bool isDone = completionMap[lookupKey] ?? false;
                                     final String? assignmentDocId = assignmentDocIdMap[lookupKey];
