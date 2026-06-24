@@ -1,0 +1,54 @@
+{
+  "project_info": {
+    "project_number": "741106847119",
+    "project_id": "anbari-manager",
+    "storage_bucket": "anbari-manager.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:741106847119:android:80263537ae68a268f40ffa",
+        "android_client_info": {
+          "package_name": "com.example.roommate_chores"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "741106847119-4c2slahujqne703ue1gtv8e3jtaqqh7m.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.roommate_chores",
+            "certificate_hash": "319d3b739600dc96f2f50b713e7ce8ed587855a6"
+          }
+        },
+        {
+          "client_id": "741106847119-vf1872ndb7a9lmhbf6fh1ddmphefjmuu.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCZ7tsa9jFw8AwLLJZG5KQm_UeKNTNeBYE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "741106847119-vf1872ndb7a9lmhbf6fh1ddmphefjmuu.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "741106847119-7hvk4e1hqiqjq0f61ade5cfdj5rpnjtp.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.roommateChores"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

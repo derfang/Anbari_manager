@@ -1,0 +1,41 @@
+{
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "anbari-manager",
+          "appId": "1:741106847119:android:80263537ae68a268f40ffa",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "anbari-manager",
+          "configurations": {
+            "android": "1:741106847119:android:80263537ae68a268f40ffa",
+            "ios": "1:741106847119:ios:f44ee076ef4737f8f40ffa",
+            "web": "1:741106847119:web:65d3f6693505fb00f40ffa",
+            "windows": "1:741106847119:web:ae82006f3bc38d92f40ffa"
+          }
+        }
+      }
+    }
+  },
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "default",
+      "disallowLegacyRuntimeConfig": true,
+      "ignore": [
+        "node_modules",
+        ".git",
+        "firebase-debug.log",
+        "firebase-debug.*.log",
+        "*.local"
+      ],
+      "predeploy": [
+        "npm --prefix \"$RESOURCE_DIR\" run build"
+      ]
+    }
+  ]
+}
