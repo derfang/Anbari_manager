@@ -74,6 +74,106 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  Future<void> _undoAssignment(String assignmentId) async {
+    await _db.collection('assignments').doc(assignmentId).update({'isCompleted': false});
+  }
+
+  Future<void> _showFalseReportDialog({
+    required String assignmentId,
+    required String choreTitle,
+    required String dayOfWeek,
+  }) async {
+    final currentUser = _auth.currentUser;
+    if (currentUser == null) return;
+
+    final results = await Future.wait([
+      _db.collection('reports').where('assignmentId', isEqualTo: assignmentId).limit(1).get(),
+      _db.collection('users').where('roomId', isEqualTo: _roomId).get(),
+    ]);
+
+    final reportQuery = results[0] as QuerySnapshot;
+    final usersSnapshot = results[1] as QuerySnapshot;
+    final teamSize = usersSnapshot.docs.length;
+    final threshold = (teamSize * 2 / 3).ceil();
+
+    if (!mounted) return;
+
+    if (reportQuery.docs.isEmpty) {
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text("Report False Completion"),
+          content: Text(
+            "Report \"$choreTitle\" on $dayOfWeek as falsely marked done?\n\n"
+            "If $threshold out of $teamSize roommates approve, it will be undone.",
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")),
+            FilledButton(
+              onPressed: () async {
+                Navigator.pop(ctx);
+                await _db.collection('reports').add({
+                  'assignmentId': assignmentId,
+                  'choreTitle': choreTitle,
+                  'dayOfWeek': dayOfWeek,
+                  'roomId': _roomId,
+                  'reportedBy': currentUser.uid,
+                  'approvals': [currentUser.uid],
+                  'status': 'pending',
+                  'createdAt': FieldValue.serverTimestamp(),
+                });
+                if (1 >= threshold) await _undoAssignment(assignmentId);
+              },
+              child: const Text("Report"),
+            ),
+          ],
+        ),
+      );
+    } else {
+      final reportDoc = reportQuery.docs.first;
+      final reportData = reportDoc.data() as Map<String, dynamic>;
+      final approvals = List<String>.from(reportData['approvals'] ?? []);
+      final alreadyApproved = approvals.contains(currentUser.uid);
+
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text("False Completion Report"),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text("\"$choreTitle\" on $dayOfWeek was reported as falsely done."),
+              const SizedBox(height: 12),
+              Text("Approvals: ${approvals.length} / $teamSize  (need $threshold to undo)"),
+              if (alreadyApproved)
+                const Padding(
+                  padding: EdgeInsets.only(top: 8),
+                  child: Text("You already approved this report.", style: TextStyle(color: Colors.grey)),
+                ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Close")),
+            if (!alreadyApproved)
+              FilledButton(
+                onPressed: () async {
+                  Navigator.pop(ctx);
+                  final newApprovals = [...approvals, currentUser.uid];
+                  await reportDoc.reference.update({'approvals': newApprovals});
+                  if (newApprovals.length >= threshold) {
+                    await _undoAssignment(assignmentId);
+                    await reportDoc.reference.update({'status': 'resolved'});
+                  }
+                },
+                child: const Text("Approve Report"),
+              ),
+          ],
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     // Show a loader while we fetch the Room ID
@@ -373,13 +473,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         );
                       }
 
-                      // Helper maps: "choreId_dayOfWeek" -> name / isCompleted
+                      // Helper maps: "choreTitle_dayOfWeek" -> name / isCompleted / docId
                       Map<String, String> assignmentMap = {};
                       Map<String, bool> completionMap = {};
+                      Map<String, String> assignmentDocIdMap = {};
                       for (var doc in assignments) {
                         String key = "${doc['choreId']}_${doc['dayOfWeek']}";
                         assignmentMap[key] = doc['assignedToName'] ?? 'Unassigned';
                         completionMap[key] = doc['isCompleted'] == true;
+                        if (doc['isCompleted'] == true) assignmentDocIdMap[key] = doc.id;
                       }
 
                       return SingleChildScrollView(
@@ -411,9 +513,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 ),
                                 // Generate the inner cells intersecting chores with days
                                 ..._weekDays.map((day) {
-                                  String lookupKey = "${chore.id}_$day";
-                                    String assignedName = assignmentMap[lookupKey] ?? '-';
-                                    bool isDone = completionMap[lookupKey] ?? false;
+                                    final String lookupKey = "${chore['title']}_$day";
+                                    final String assignedName = assignmentMap[lookupKey] ?? '-';
+                                    final bool isDone = completionMap[lookupKey] ?? false;
+                                    final String? assignmentDocId = assignmentDocIdMap[lookupKey];
 
                                     return DataCell(
                                       Container(
@@ -430,6 +533,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                           ),
                                         ),
                                       ),
+                                      onTap: isDone && assignmentDocId != null
+                                          ? () => _showFalseReportDialog(
+                                                assignmentId: assignmentDocId,
+                                                choreTitle: chore['title'],
+                                                dayOfWeek: day,
+                                              )
+                                          : null,
                                     );
                                   }),
                                 ],
