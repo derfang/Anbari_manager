@@ -33,8 +33,12 @@ class _AbsenceScreenState extends State<AbsenceScreen> {
     final data = doc.data() as Map<String, dynamic>?;
     if (mounted) {
       setState(() {
-        _roomId = data?['roomId'];
-        _isAdmin = data != null && (data['role'] == 'admin' || data['isAdmin'] == true);
+        _roomId = data?['currentRoomId'] ?? data?['roomId'];
+        if (_roomId != null && data?['roles'] != null && data!['roles'][_roomId] != null) {
+          _isAdmin = data['roles'][_roomId] == 'admin';
+        } else {
+          _isAdmin = data != null && (data['role'] == 'admin' || data['isAdmin'] == true);
+        }
       });
     }
   }

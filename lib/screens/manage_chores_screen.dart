@@ -31,8 +31,12 @@ class _ManageChoresScreenState extends State<ManageChoresScreen> {
       if (mounted) {
         final data = doc.data() as Map<String, dynamic>?;
         setState(() {
-          _roomId = doc['roomId'];
-          _isAdmin = data != null && (data['role'] == 'admin' || data['isAdmin'] == true);
+          _roomId = data?['currentRoomId'] ?? data?['roomId'];
+          if (_roomId != null && data?['roles'] != null && data!['roles'][_roomId] != null) {
+            _isAdmin = data['roles'][_roomId] == 'admin';
+          } else {
+            _isAdmin = data != null && (data['role'] == 'admin' || data['isAdmin'] == true);
+          }
           _isLoading = false;
         });
       }

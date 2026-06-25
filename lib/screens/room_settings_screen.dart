@@ -18,6 +18,7 @@ class _RoomSettingsScreenState extends State<RoomSettingsScreen> {
 
   String? _roomId;
   String? _roomPassword;
+  bool _isAdmin = false;
   bool _isLoading = true;
 
   @override
@@ -32,7 +33,16 @@ class _RoomSettingsScreenState extends State<RoomSettingsScreen> {
 
     final userDoc = await _db.collection('users').doc(user.uid).get();
     if (userDoc.exists) {
-      final roomId = userDoc['roomId'];
+      final userData = userDoc.data() as Map<String, dynamic>?;
+      final roomId = userData?['currentRoomId'] ?? userData?['roomId'];
+      
+      bool isAdmin = false;
+      if (roomId != null && userData?['roles'] != null && userData!['roles'][roomId] != null) {
+        isAdmin = userData['roles'][roomId] == 'admin';
+      } else {
+        isAdmin = userData != null && (userData['role'] == 'admin' || userData['isAdmin'] == true);
+      }
+
       final roomDoc = await _db.collection('rooms').doc(roomId).get();
       
       String? password;
@@ -53,6 +63,7 @@ class _RoomSettingsScreenState extends State<RoomSettingsScreen> {
         setState(() {
           _roomId = roomId;
           _roomPassword = password;
+          _isAdmin = isAdmin;
           _isLoading = false;
         });
       }
@@ -192,10 +203,10 @@ class _RoomSettingsScreenState extends State<RoomSettingsScreen> {
                           subtitle: Text("${data['points']?.toStringAsFixed(1) ?? '0.0'} pts"),
                           trailing: isMe 
                             ? const Chip(label: Text("You"))
-                            : IconButton(
+                            : (_isAdmin ? IconButton(
                                 icon: const Icon(Icons.person_remove, color: Colors.red),
                                 onPressed: () => _removeUser(doc.id, data['name']),
-                              ),
+                              ) : null),
                         ),
                       );
                     },
@@ -203,9 +214,102 @@ class _RoomSettingsScreenState extends State<RoomSettingsScreen> {
                 },
               ),
             ),
+            if (_isAdmin) ...[
+              const SizedBox(height: 24),
+              const Divider(color: Colors.redAccent),
+              const SizedBox(height: 8),
+              const Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  "Danger Zone",
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.redAccent),
+                ),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _resetRoom,
+                  icon: const Icon(Icons.warning_amber_rounded, color: Colors.red),
+                  label: const Text("Reset Room Leaderboard & Schedule", style: TextStyle(color: Colors.red)),
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: Colors.red),
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                  ),
+                ),
+              ),
+            ],
           ],
         ),
       ),
     );
+  }
+
+  Future<void> _resetRoom() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Reset Room?"),
+        content: const Text(
+          "Are you sure you want to reset this room? This will set all roommate points to 0, wipe all generated chores, and clear all dispute reports.\n\nChores themselves and absences will be preserved.",
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Cancel")),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true), 
+            child: const Text("Reset", style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    setState(() => _isLoading = true);
+
+    try {
+      final batch = _db.batch();
+
+      // 1. Reset points for all users in this room
+      final usersSnapshot = await _db.collection('users')
+          .where(Filter.or(Filter('roomId', isEqualTo: _roomId), Filter('roomIds', arrayContains: _roomId)))
+          .get();
+      for (var doc in usersSnapshot.docs) {
+        batch.update(doc.reference, {'points': 0.0});
+      }
+
+      // 2. Wipe all assignments
+      final assignmentsSnapshot = await _db.collection('assignments').where('roomId', isEqualTo: _roomId).get();
+      for (var doc in assignmentsSnapshot.docs) {
+        batch.delete(doc.reference);
+      }
+
+      // 3. Wipe all reports
+      final reportsSnapshot = await _db.collection('reports').where('roomId', isEqualTo: _roomId).get();
+      for (var doc in reportsSnapshot.docs) {
+        batch.delete(doc.reference);
+      }
+
+      // 4. Wipe all history
+      final historySnapshot = await _db.collection('chore_history').where('roomId', isEqualTo: _roomId).get();
+      for (var doc in historySnapshot.docs) {
+        batch.delete(doc.reference);
+      }
+
+      await batch.commit();
+
+      // Regenerate the clean schedule
+      await _choreService.recalculateSchedule(_roomId!);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Room has been successfully reset!")));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error resetting room: $e")));
+      }
+    }
+
+    if (mounted) setState(() => _isLoading = false);
   }
 }
