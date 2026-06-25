@@ -579,15 +579,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         );
                       }
 
-                      // Helper maps: "choreTitle_dayOfWeek" -> name / isCompleted / docId
+                      // Helper maps: "choreTitle_dayOfWeek" -> name / isCompleted / docId / userId
                       Map<String, String> assignmentMap = {};
                       Map<String, bool> completionMap = {};
                       Map<String, String> assignmentDocIdMap = {};
+                      Map<String, String> assignedUserIdMap = {};
                       for (var doc in assignments) {
                         String key = "${doc['choreId']}_${doc['dayOfWeek']}";
                         assignmentMap[key] = doc['assignedToName'] ?? 'Unassigned';
                         completionMap[key] = doc['isCompleted'] == true;
-                        if (doc['isCompleted'] == true) assignmentDocIdMap[key] = doc.id;
+                        assignmentDocIdMap[key] = doc.id;
+                        assignedUserIdMap[key] = doc['assignedToUserId'];
                       }
 
                       return SingleChildScrollView(
@@ -623,6 +625,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                     final String assignedName = assignmentMap[lookupKey] ?? '-';
                                     final bool isDone = completionMap[lookupKey] ?? false;
                                     final String? assignmentDocId = assignmentDocIdMap[lookupKey];
+                                    final String? assignedUserId = assignedUserIdMap[lookupKey];
+                                    final bool isMyChore = assignedUserId == _auth.currentUser?.uid;
 
                                     return DataCell(
                                       Container(
@@ -639,12 +643,47 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                           ),
                                         ),
                                       ),
-                                      onTap: isDone && assignmentDocId != null
-                                          ? () => _showFalseReportDialog(
-                                                assignmentId: assignmentDocId,
-                                                choreTitle: chore['title'],
-                                                dayOfWeek: day,
-                                              )
+                                      onTap: assignmentDocId != null
+                                          ? () {
+                                              if (isDone) {
+                                                _showFalseReportDialog(
+                                                  assignmentId: assignmentDocId,
+                                                  choreTitle: chore['title'],
+                                                  dayOfWeek: day,
+                                                );
+                                              } else if (isMyChore) {
+                                                showDialog(
+                                                  context: context,
+                                                  builder: (ctx) => AlertDialog(
+                                                    title: const Text("Mark Chore Done?"),
+                                                    content: Text("Are you finished with \"${chore['title']}\"?"),
+                                                    actions: [
+                                                      TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")),
+                                                      FilledButton(
+                                                        onPressed: () async {
+                                                          Navigator.pop(ctx);
+                                                          try {
+                                                            await _choreService.completeChore(
+                                                              roomId: _roomId!,
+                                                              choreId: chore.id,
+                                                              doerIds: [assignedUserId!],
+                                                            );
+                                                            await _db.collection('assignments').doc(assignmentDocId).update({'isCompleted': true});
+                                                          } catch (e) {
+                                                            if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
+                                                          }
+                                                        },
+                                                        child: const Text("Mark Done"),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                );
+                                              } else {
+                                                ScaffoldMessenger.of(context).showSnackBar(
+                                                  SnackBar(content: Text("Only $assignedName can mark this done!")),
+                                                );
+                                              }
+                                            }
                                           : null,
                                     );
                                   }),
