@@ -101,8 +101,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
         doerIds: [assignedToUserId],
       );
 
-      // 2. Mark the assignment as pending again
-      await _db.collection('assignments').doc(assignmentId).update({'isCompleted': false});
+      // 2. Mark the assignment as pending and disputed again
+      await _db.collection('assignments').doc(assignmentId).update({
+        'isCompleted': false,
+        'disputed': true,
+      });
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error undoing chore: $e")));
     }
@@ -117,16 +120,41 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (currentUser == null) return;
 
     final results = await Future.wait([
-      _db.collection('reports').where('assignmentId', isEqualTo: assignmentId).limit(1).get(),
+      _db.collection('reports')
+          .where('assignmentId', isEqualTo: assignmentId)
+          .where('type', isEqualTo: 'false_completion')
+          .where('status', isEqualTo: 'pending')
+          .limit(1).get(),
+      _db.collection('reports')
+          .where('assignmentId', isEqualTo: assignmentId)
+          .where('type', isEqualTo: 'completion_request')
+          .where('status', isEqualTo: 'resolved')
+          .limit(1).get(),
       _db.collection('users').where('roomId', isEqualTo: _roomId).get(),
     ]);
 
     final reportQuery = results[0] as QuerySnapshot;
-    final usersSnapshot = results[1] as QuerySnapshot;
+    final resolvedCompletionQuery = results[1] as QuerySnapshot;
+    final usersSnapshot = results[2] as QuerySnapshot;
     final teamSize = usersSnapshot.docs.length;
     final threshold = (teamSize * 2 / 3).ceil();
 
     if (!mounted) return;
+
+    // Prevent double-jeopardy: If the room voted it was done, it can't be reported as false again.
+    if (resolvedCompletionQuery.docs.isNotEmpty) {
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text("Chore Verified"),
+          content: const Text("This chore's completion was democratically verified by a roommate vote. It can no longer be reported as false."),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Close")),
+          ],
+        ),
+      );
+      return;
+    }
 
     if (reportQuery.docs.isEmpty) {
       showDialog(
@@ -150,6 +178,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   'reportedBy': currentUser.uid,
                   'approvals': [currentUser.uid],
                   'status': 'pending',
+                  'type': 'false_completion',
                   'createdAt': FieldValue.serverTimestamp(),
                 });
                 if (1 >= threshold) await _undoAssignment(assignmentId);
@@ -202,6 +231,136 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ),
       );
     }
+  }
+
+  Future<void> _requestCompletionVoteDialog({
+    required String assignmentId,
+    required String choreTitle,
+  }) async {
+    final currentUser = _auth.currentUser;
+    if (currentUser == null) return;
+
+    final reportQuery = await _db.collection('reports')
+        .where('assignmentId', isEqualTo: assignmentId)
+        .where('type', isEqualTo: 'completion_request')
+        .where('status', isEqualTo: 'pending')
+        .limit(1).get();
+
+    if (!mounted) return;
+
+    if (reportQuery.docs.isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("A completion vote is already pending!")));
+      return;
+    }
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Chore Disputed"),
+        content: Text(
+          "\"$choreTitle\" was previously marked as incomplete by your roommates. "
+          "You must request a 2/3 majority vote to mark it as done again."
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")),
+          FilledButton(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              await _db.collection('reports').add({
+                'assignmentId': assignmentId,
+                'choreTitle': choreTitle,
+                'roomId': _roomId,
+                'reportedBy': currentUser.uid,
+                'approvals': [], // Only roommates vote
+                'status': 'pending',
+                'type': 'completion_request',
+                'createdAt': FieldValue.serverTimestamp(),
+              });
+              if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Vote requested!")));
+            },
+            child: const Text("Request Vote"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showCompletionVoteDialog({
+    required String assignmentId,
+    required String choreTitle,
+    required String choreId,
+    required String assignedUserId,
+  }) async {
+    final currentUser = _auth.currentUser;
+    if (currentUser == null) return;
+
+    final results = await Future.wait([
+      _db.collection('reports')
+          .where('assignmentId', isEqualTo: assignmentId)
+          .where('type', isEqualTo: 'completion_request')
+          .where('status', isEqualTo: 'pending')
+          .limit(1).get(),
+      _db.collection('users').where('roomId', isEqualTo: _roomId).get(),
+    ]);
+
+    final reportQuery = results[0] as QuerySnapshot;
+    final usersSnapshot = results[1] as QuerySnapshot;
+    final teamSize = usersSnapshot.docs.length;
+    final threshold = (teamSize * 2 / 3).ceil();
+
+    if (!mounted) return;
+
+    if (reportQuery.docs.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Only the assigned user can initiate a completion vote.")));
+      return;
+    }
+
+    final reportDoc = reportQuery.docs.first;
+    final reportData = reportDoc.data() as Map<String, dynamic>;
+    final approvals = List<String>.from(reportData['approvals'] ?? []);
+    final alreadyApproved = approvals.contains(currentUser.uid);
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Approve Completion"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text("The assigned user claims \"$choreTitle\" is now fully completed."),
+            const SizedBox(height: 12),
+            Text("Approvals: ${approvals.length} / $teamSize  (need $threshold to complete)"),
+            if (alreadyApproved)
+              const Padding(
+                padding: EdgeInsets.only(top: 8),
+                child: Text("You already approved this completion.", style: TextStyle(color: Colors.grey)),
+              ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Close")),
+          if (!alreadyApproved)
+            FilledButton(
+              onPressed: () async {
+                Navigator.pop(ctx);
+                final newApprovals = [...approvals, currentUser.uid];
+                await reportDoc.reference.update({'approvals': newApprovals});
+                if (newApprovals.length >= threshold) {
+                  await _choreService.completeChore(
+                    roomId: _roomId!,
+                    choreId: choreId,
+                    doerIds: [assignedUserId],
+                  );
+                  await _db.collection('assignments').doc(assignmentId).update({'isCompleted': true, 'disputed': false});
+                  await reportDoc.reference.update({'status': 'resolved'});
+                }
+              },
+              child: const Text("Approve Completion"),
+            ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -338,14 +497,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 return Column(
                   children: pendingReports.map((doc) {
                     final data = doc.data() as Map<String, dynamic>;
+                    final isCompletionReq = data['type'] == 'completion_request';
+                    final titleText = isCompletionReq
+                        ? "\"${data['choreTitle']}\" completion vote requested by assigned user."
+                        : "\"${data['choreTitle']}\" on ${data['dayOfWeek'] ?? 'this week'} was reported as falsely done.";
+
                     return MaterialBanner(
-                      backgroundColor: Colors.red.shade50,
-                      leading: const Icon(Icons.flag, color: Colors.red),
-                      content: Text("\"${data['choreTitle']}\" on ${data['dayOfWeek']} was reported as falsely done."),
+                      backgroundColor: isCompletionReq ? Colors.blue.shade50 : Colors.red.shade50,
+                      leading: Icon(isCompletionReq ? Icons.how_to_reg : Icons.flag, color: isCompletionReq ? Colors.blue : Colors.red),
+                      content: Text(titleText),
                       actions: [
                         TextButton(
                           onPressed: () async {
-                            final approvals = List<String>.from(data['approvals'] ?? []);
                             final ignored = List<String>.from(data['ignored'] ?? []);
                             await doc.reference.update({'ignored': [...ignored, currentUid!]});
                           },
@@ -360,12 +523,31 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             final usersSnap = await _db.collection('users').where('roomId', isEqualTo: _roomId).get();
                             final threshold = (usersSnap.docs.length * 2 / 3).ceil();
                             if (newApprovals.length >= threshold) {
-                              await _undoAssignment(data['assignmentId']);
-                              await doc.reference.update({'status': 'resolved'});
-                              if (context.mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(content: Text("Report approved! \"${data['choreTitle']}\" marked as undone.")),
-                                );
+                              if (isCompletionReq) {
+                                final assignmentDoc = await _db.collection('assignments').doc(data['assignmentId']).get();
+                                if (assignmentDoc.exists) {
+                                  final assignData = assignmentDoc.data() as Map<String, dynamic>;
+                                  await _choreService.completeChore(
+                                    roomId: _roomId!,
+                                    choreId: assignData['choreId'],
+                                    doerIds: [assignData['assignedToUserId']],
+                                  );
+                                  await assignmentDoc.reference.update({'isCompleted': true, 'disputed': false});
+                                }
+                                await doc.reference.update({'status': 'resolved'});
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text("Completion approved! \"${data['choreTitle']}\" marked done.")),
+                                  );
+                                }
+                              } else {
+                                await _undoAssignment(data['assignmentId']);
+                                await doc.reference.update({'status': 'resolved'});
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text("Report approved! \"${data['choreTitle']}\" marked as undone.")),
+                                  );
+                                }
                               }
                             }
                           },
@@ -461,6 +643,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             subtitle: Text("Due: ${data['dayOfWeek'] ?? data['day']}"),
                             trailing: FilledButton(
                               onPressed: isSubmitting ? null : () async {
+                                if (data['disputed'] == true) {
+                                  await _requestCompletionVoteDialog(
+                                    assignmentId: doc.id,
+                                    choreTitle: data['choreTitle'] ?? data['choreId'],
+                                  );
+                                  return;
+                                }
+
                                 setBtnState(() => isSubmitting = true);
                                 try {
                                   await _choreService.completeChore(
@@ -584,12 +774,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       Map<String, bool> completionMap = {};
                       Map<String, String> assignmentDocIdMap = {};
                       Map<String, String> assignedUserIdMap = {};
+                      Map<String, bool> disputedMap = {};
                       for (var doc in assignments) {
-                        String key = "${doc['choreId']}_${doc['dayOfWeek']}";
-                        assignmentMap[key] = doc['assignedToName'] ?? 'Unassigned';
-                        completionMap[key] = doc['isCompleted'] == true;
+                        final data = doc.data() as Map<String, dynamic>;
+                        String key = "${data['choreId']}_${data['dayOfWeek']}";
+                        assignmentMap[key] = data['assignedToName'] ?? 'Unassigned';
+                        completionMap[key] = data['isCompleted'] == true;
                         assignmentDocIdMap[key] = doc.id;
-                        assignedUserIdMap[key] = doc['assignedToUserId'];
+                        assignedUserIdMap[key] = data['assignedToUserId'];
+                        disputedMap[key] = data['disputed'] == true;
                       }
 
                       return SingleChildScrollView(
@@ -626,13 +819,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                     final bool isDone = completionMap[lookupKey] ?? false;
                                     final String? assignmentDocId = assignmentDocIdMap[lookupKey];
                                     final String? assignedUserId = assignedUserIdMap[lookupKey];
+                                    final bool isDisputed = disputedMap[lookupKey] ?? false;
                                     final bool isMyChore = assignedUserId == _auth.currentUser?.uid;
 
                                     return DataCell(
                                       Container(
                                         width: double.infinity,
                                         padding: const EdgeInsets.symmetric(horizontal: 12),
-                                        color: isDone ? Colors.green.shade300 : null,
+                                        color: isDone ? Colors.green.shade300 : (isDisputed ? Colors.orange.shade100 : null),
                                         alignment: Alignment.center,
                                         child: Text(
                                           assignedName,
@@ -651,6 +845,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                                   choreTitle: chore['title'],
                                                   dayOfWeek: day,
                                                 );
+                                              } else if (isDisputed) {
+                                                if (isMyChore) {
+                                                  _requestCompletionVoteDialog(
+                                                    assignmentId: assignmentDocId,
+                                                    choreTitle: chore['title'],
+                                                  );
+                                                } else {
+                                                  _showCompletionVoteDialog(
+                                                    assignmentId: assignmentDocId,
+                                                    choreTitle: chore['title'],
+                                                    choreId: chore.id,
+                                                    assignedUserId: assignedUserId!,
+                                                  );
+                                                }
                                               } else if (isMyChore) {
                                                 showDialog(
                                                   context: context,
