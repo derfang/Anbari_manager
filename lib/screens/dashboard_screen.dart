@@ -85,7 +85,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<void> _undoAssignment(String assignmentId) async {
-    await _db.collection('assignments').doc(assignmentId).update({'isCompleted': false});
+    final doc = await _db.collection('assignments').doc(assignmentId).get();
+    if (!doc.exists) return;
+    
+    final data = doc.data() as Map<String, dynamic>;
+    final roomId = data['roomId'];
+    final choreId = data['choreId'];
+    final assignedToUserId = data['assignedToUserId'];
+
+    try {
+      // 1. Revert the math using ChoreService
+      await _choreService.undoChore(
+        roomId: roomId, 
+        choreId: choreId, 
+        doerIds: [assignedToUserId],
+      );
+
+      // 2. Mark the assignment as pending again
+      await _db.collection('assignments').doc(assignmentId).update({'isCompleted': false});
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error undoing chore: $e")));
+    }
   }
 
   Future<void> _showFalseReportDialog({
@@ -637,6 +657,60 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   );
                 },
               ),
+              
+              const SizedBox(height: 32),
+              const Text("Roommate Leaderboard", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 12),
+              StreamBuilder<QuerySnapshot>(
+                stream: _db.collection('users')
+                  .where(Filter.or(
+                    Filter('roomId', isEqualTo: _roomId),
+                    Filter('roomIds', arrayContains: _roomId)
+                  ))
+                  .snapshots(),
+                builder: (context, snapshot) {
+                  if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+                  final users = snapshot.data!.docs.toList();
+                  
+                  // Sort locally to avoid Firestore composite index requirements
+                  users.sort((a, b) {
+                    final dataA = a.data() as Map<String, dynamic>;
+                    final dataB = b.data() as Map<String, dynamic>;
+                    final ptsA = (dataA['points'] ?? 0.0).toDouble();
+                    final ptsB = (dataB['points'] ?? 0.0).toDouble();
+                    return ptsB.compareTo(ptsA);
+                  });
+
+                  if (users.isEmpty) {
+                    return const Card(child: Padding(padding: EdgeInsets.all(16), child: Text("No roommates found.")));
+                  }
+
+                  return Card(
+                    elevation: 2,
+                    child: ListView.separated(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: users.length,
+                      separatorBuilder: (context, index) => const Divider(height: 1),
+                      itemBuilder: (context, index) {
+                        final userData = users[index].data() as Map<String, dynamic>;
+                        final points = (userData['points'] ?? 0.0).toDouble();
+                        return ListTile(
+                          leading: CircleAvatar(
+                            backgroundColor: index == 0 ? Colors.amber : Colors.teal.shade100,
+                            child: index == 0 
+                                ? const Icon(Icons.emoji_events, color: Colors.white, size: 20)
+                                : Text("${index + 1}", style: TextStyle(color: Colors.teal.shade800, fontWeight: FontWeight.bold)),
+                          ),
+                          title: Text(userData['name'] ?? 'Unknown', style: const TextStyle(fontWeight: FontWeight.w600)),
+                          trailing: Text("${points.toStringAsFixed(1)} pts", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                        );
+                      },
+                    ),
+                  );
+                },
+              ),
+              const SizedBox(height: 32),
           ],
         ),
       ),

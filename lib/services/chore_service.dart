@@ -90,13 +90,16 @@ class ChoreService {
       final choreDoc = await _db.collection('chores').doc(choreId).get();
       if (!choreDoc.exists) throw Exception("Chore not found");
 
-      final double effortValue = (choreDoc.data()?['effortValue'] ?? 0)
+      final double effortValue = (choreDoc.data()?['points'] ?? 0)
           .toDouble();
 
       // 2. Fetch all users in the room
       final usersSnapshot = await _db
           .collection('users')
-          .where('roomId', isEqualTo: roomId) // FIXED: Named parameter syntax
+          .where(Filter.or(
+            Filter('roomId', isEqualTo: roomId),
+            Filter('roomIds', arrayContains: roomId)
+          ))
           .get();
 
       List<DocumentSnapshot> presentSlackers = [];
@@ -158,6 +161,66 @@ class ChoreService {
       ); // FIXED: Using debugPrint
     } catch (e) {
       debugPrint("Error processing chore math: $e"); // FIXED: Using debugPrint
+      rethrow;
+    }
+  }
+
+  Future<void> undoChore({
+    required String roomId,
+    required String choreId,
+    required List<String> doerIds,
+  }) async {
+    try {
+      final choreDoc = await _db.collection('chores').doc(choreId).get();
+      if (!choreDoc.exists) throw Exception("Chore not found");
+
+      final double effortValue = (choreDoc.data()?['points'] ?? 0).toDouble();
+
+      final usersSnapshot = await _db
+          .collection('users')
+          .where(Filter.or(
+            Filter('roomId', isEqualTo: roomId),
+            Filter('roomIds', arrayContains: roomId)
+          ))
+          .get();
+
+      List<DocumentSnapshot> presentSlackers = [];
+      List<DocumentSnapshot> doers = [];
+
+      for (var doc in usersSnapshot.docs) {
+        final data = doc.data() as Map<String, dynamic>;
+        if (doerIds.contains(doc.id)) {
+          doers.add(doc);
+        } else if (data['isAbsent'] != true) {
+          presentSlackers.add(doc);
+        }
+      }
+
+      if (presentSlackers.isEmpty) {
+        throw Exception("No slackers! Math engine aborted to prevent errors.");
+      }
+
+      final double slackerTax = (effortValue * doers.length) / presentSlackers.length;
+      final batch = _db.batch();
+
+      // Un-reward the doers
+      for (var doer in doers) {
+        batch.update(doer.reference, {
+          'points': FieldValue.increment(-effortValue),
+        });
+      }
+
+      // Un-tax the slackers
+      for (var slacker in presentSlackers) {
+        batch.update(slacker.reference, {
+          'points': FieldValue.increment(slackerTax),
+        });
+      }
+
+      await batch.commit();
+      debugPrint("Zero-sum points successfully reverted!");
+    } catch (e) {
+      debugPrint("Error reverting chore math: $e");
       rethrow;
     }
   }
