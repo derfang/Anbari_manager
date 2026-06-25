@@ -43,14 +43,17 @@ class _JoinRoomScreenState extends State<JoinRoomScreen> {
         throw Exception("Room not found or invalid password.");
       }
 
-      // 3. Create the roommate's profile in the database
+      // 3. Create or update the roommate's profile in the database
       await _db.collection('users').doc(widget.userId).set({
         'name': widget.userName,
-        'roomId': roomId,
-        'points': 0.0,
+        'roomId': roomId, // legacy fallback
+        'currentRoomId': roomId,
+        'roomIds': FieldValue.arrayUnion([roomId]),
+        'roles': {roomId: 'user'}, // map role per room
+        'points': FieldValue.increment(0.0), // Safely initialize points
         'isAdmin': false,
         'isAbsent': false,
-      });
+      }, SetOptions(merge: true));
 
       // 4. Recalculate the schedule so the new user gets chores immediately
       await ChoreService().recalculateSchedule(roomId);
@@ -60,12 +63,10 @@ class _JoinRoomScreenState extends State<JoinRoomScreen> {
         const SnackBar(content: Text("Successfully joined the room!")),
       );
 
-      // Navigate to Dashboard
-      Navigator.pushAndRemoveUntil(
-        context,
-        MaterialPageRoute(builder: (context) => const DashboardScreen()),
-        (route) => false,
-      );
+      // 5. Pop the Join Screen. RoomGateWrapper will automatically route them to the new Dashboard!
+      if (Navigator.canPop(context)) {
+        Navigator.pop(context);
+      }
 
     } catch (e) {
       setState(() => _isProcessing = false);

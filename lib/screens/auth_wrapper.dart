@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'auth_screen.dart';
 import 'dashboard_screen.dart';
+import 'room_gate_wrapper.dart';
 
 class AuthWrapper extends StatelessWidget {
   const AuthWrapper({super.key});
@@ -17,9 +18,9 @@ class AuthWrapper extends StatelessWidget {
           return const Scaffold(body: Center(child: CircularProgressIndicator()));
         }
         
-        // If Firebase found a saved login token, skip straight to the dashboard!
+        // If Firebase found a saved login token, check their rooms!
         if (snapshot.hasData) {
-          return const DashboardScreen();
+          return const RoomGateWrapper();
         }
         
         // Otherwise, they are completely logged out. Show the login screen.

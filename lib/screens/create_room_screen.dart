@@ -76,9 +76,10 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
       await _db.collection('users').doc(widget.creatorId).set({
         'uid': widget.creatorId,
         'name': widget.creatorName,
-        'roomId': roomId,
-        'role': 'admin',
-        'isAdmin': true, // Add this explicitly for Firestore rules
+        'roomId': roomId, // legacy fallback
+        'currentRoomId': roomId,
+        'roomIds': FieldValue.arrayUnion([roomId]),
+        'roles': {roomId: 'admin'}, // map role per room
         'joinedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
 
@@ -87,12 +88,10 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
 
       if (!mounted) return;
 
-      // 4. Wipe navigation stack and enter the app dashboard
-      Navigator.pushAndRemoveUntil(
-        context,
-        MaterialPageRoute(builder: (context) => const DashboardScreen()),
-        (route) => false,
-      );
+      // 4. Pop the Create Screen. RoomGateWrapper will automatically route them to the new Dashboard!
+      if (Navigator.canPop(context)) {
+        Navigator.pop(context);
+      }
     } catch (e) {
       setState(() => _isLoading = false);
       if (!mounted) return;

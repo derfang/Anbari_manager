@@ -7,9 +7,11 @@ import 'auth_screen.dart';
 import 'absence_screen.dart';
 import 'room_settings_screen.dart';
 import '../services/chore_service.dart';
+import 'room_selection_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
-  const DashboardScreen({super.key});
+  final String? roomId;
+  const DashboardScreen({super.key, this.roomId});
 
   @override
   State<DashboardScreen> createState() => _DashboardScreenState();
@@ -49,9 +51,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final doc = await _db.collection('users').doc(user.uid).get();
       if (mounted) {
         setState(() {
-          _roomId = doc['roomId'];
           final data = doc.data() as Map<String, dynamic>?;
-          _isAdmin = data != null && (data['role'] == 'admin' || data['isAdmin'] == true);
+          if (data != null) {
+            _roomId = widget.roomId ?? data['currentRoomId'] ?? data['roomId'];
+            
+            // Check roles map first, fallback to legacy role/isAdmin fields
+            if (data['roles'] != null && data['roles'][_roomId] != null) {
+              _isAdmin = data['roles'][_roomId] == 'admin';
+            } else {
+              _isAdmin = (data['role'] == 'admin' || data['isAdmin'] == true);
+            }
+          }
           _isLoading = false;
         });
         
@@ -185,6 +195,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
       appBar: AppBar(
         title: const Text("Apartment Dashboard"),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.swap_horiz),
+            tooltip: "Switch Rooms",
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const RoomSelectionScreen()),
+              );
+            },
+          ),
           // Removed manual calendar generation icon as schedule generation is now fully automated
           IconButton(
             icon: const Icon(Icons.flight_takeoff),
