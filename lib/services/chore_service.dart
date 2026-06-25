@@ -347,6 +347,7 @@ class ChoreService {
               'roomId': roomId,
               'choreId': chore['id'], 
               'choreTitle': chore['title'],
+              'choreIcon': chore['icon'] ?? 'cleaning_services',
               'assignedToUserId': assignedUser['id'],
               'assignedToName': assignedUser['name'],
               'day': dayString,

@@ -32,10 +32,10 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
   // Inject a starter pack of chores into the database for this new room
   Future<void> _generateDefaultChores(String roomId) async {
     final List<Map<String, dynamic>> defaultTasks = [
-      {'title': 'Take out the Trash', 'points': 1.0, 'crew': 1, 'frequencyDays': 7, 'roomId': roomId},
-      {'title': 'Clean the Bathroom', 'points': 3.0, 'crew': 1, 'frequencyDays': 7, 'roomId': roomId},
-      {'title': 'Sweep & Mop Floors', 'points': 2.0, 'crew': 1, 'frequencyDays': 7, 'roomId': roomId},
-      {'title': 'Wipe Kitchen Counters', 'points': 1.0, 'crew': 1, 'frequencyDays': 1, 'roomId': roomId},
+      {'title': 'Take out the Trash', 'icon': 'delete', 'points': 1.0, 'crew': 1, 'frequencyDays': 7, 'roomId': roomId},
+      {'title': 'Clean the Bathroom', 'icon': 'shower', 'points': 3.0, 'crew': 1, 'frequencyDays': 7, 'roomId': roomId},
+      {'title': 'Sweep & Mop Floors', 'icon': 'wash', 'points': 2.0, 'crew': 1, 'frequencyDays': 7, 'roomId': roomId},
+      {'title': 'Wipe Kitchen Counters', 'icon': 'kitchen', 'points': 1.0, 'crew': 1, 'frequencyDays': 1, 'roomId': roomId},
     ];
 
     final batch = _db.batch();

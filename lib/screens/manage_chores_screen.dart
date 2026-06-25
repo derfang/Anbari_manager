@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../services/chore_service.dart';
+import '../utils/chore_icons.dart';
 
 class ManageChoresScreen extends StatefulWidget {
   const ManageChoresScreen({super.key});
@@ -51,6 +52,9 @@ class _ManageChoresScreenState extends State<ManageChoresScreen> {
     double effortPoints = existingChore != null ? (existingChore['points'] as num).toDouble() : 1.0;
     int crewNeeded = existingChore != null ? existingChore['crew'] : 1;
     int frequencyDays = existingChore != null ? existingChore['frequencyDays'] : 7;
+    
+    final List<String> availableIcons = choreIcons.keys.toList();
+    String selectedIcon = existingChore != null ? (existingChore.data().toString().contains('icon') ? existingChore['icon'] : 'cleaning_services') : 'cleaning_services';
 
     showDialog(
       context: context,
@@ -68,6 +72,33 @@ class _ManageChoresScreenState extends State<ManageChoresScreen> {
                     TextField(
                       controller: titleController,
                       decoration: const InputDecoration(labelText: "Task Name (e.g., Vacuuming)"),
+                    ),
+                    const SizedBox(height: 20),
+
+                    const Text("Chore Icon:", style: TextStyle(fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: availableIcons.map((iconName) {
+                        final isSelected = selectedIcon == iconName;
+                        return GestureDetector(
+                          onTap: () => setDialogState(() => selectedIcon = iconName),
+                          child: Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: isSelected ? Colors.teal.withOpacity(0.2) : Colors.grey.withOpacity(0.1),
+                              border: Border.all(color: isSelected ? Colors.teal : Colors.transparent, width: 2),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Icon(
+                              choreIcons[iconName] ?? Icons.cleaning_services,
+                              size: 28,
+                              color: isSelected ? Colors.teal : Colors.grey.shade700,
+                            ),
+                          ),
+                        );
+                      }).toList(),
                     ),
                     const SizedBox(height: 20),
                     
@@ -122,6 +153,7 @@ class _ManageChoresScreenState extends State<ManageChoresScreen> {
                     final choreData = {
                       'roomId': _roomId,
                       'title': titleController.text.trim(),
+                      'icon': selectedIcon,
                       'points': effortPoints,
                       'crew': crewNeeded,
                       'frequencyDays': frequencyDays,
@@ -178,10 +210,16 @@ class _ManageChoresScreenState extends State<ManageChoresScreen> {
             itemCount: chores.length,
             itemBuilder: (context, index) {
               final chore = chores[index];
+              final data = chore.data() as Map<String, dynamic>;
               return Card(
                 margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 child: ListTile(
-                  title: Text(chore['title'], style: const TextStyle(fontWeight: FontWeight.bold)),
+                  leading: Icon(
+                    choreIcons[data['icon']] ?? Icons.cleaning_services,
+                    size: 32,
+                    color: Colors.teal,
+                  ),
+                  title: Text(data['title'], style: const TextStyle(fontWeight: FontWeight.bold)),
                   subtitle: Text("${chore['points']} pts • ${chore['crew']} person crew • Every ${chore['frequencyDays']} days"),
                   trailing: _isAdmin
                       ? Row(

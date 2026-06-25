@@ -8,6 +8,7 @@ import 'absence_screen.dart';
 import 'room_settings_screen.dart';
 import '../services/chore_service.dart';
 import 'room_selection_screen.dart';
+import '../utils/chore_icons.dart';
 
 class DashboardScreen extends StatefulWidget {
   final String? roomId;
@@ -638,7 +639,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           elevation: 2,
                           margin: const EdgeInsets.only(bottom: 12),
                           child: ListTile(
-                            leading: const Icon(Icons.cleaning_services, size: 36, color: Colors.teal),
+                            leading: Icon(
+                              choreIcons[data['choreIcon']] ?? Icons.cleaning_services,
+                              size: 36,
+                              color: Colors.teal,
+                            ),
                             title: Text(data['choreTitle'] ?? data['choreId'], style: const TextStyle(fontWeight: FontWeight.w600)),
                             subtitle: Text("Due: ${data['dayOfWeek'] ?? data['day']}"),
                             trailing: FilledButton(
