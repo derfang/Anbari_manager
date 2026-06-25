@@ -43,11 +43,11 @@ class ChoreService {
     }
   }
 
-  Future<void> recalculateSchedule(String roomId) async {
+  Future<void> recalculateSchedule(String roomId, {int startWeekOffset = 0, int endWeekOffset = 1}) async {
     await cleanOldAssignments(roomId);
 
-    final currentBounds = getWeekBounds(0);
-    final nextBounds = getWeekBounds(1);
+    final currentBounds = getWeekBounds(startWeekOffset);
+    final nextBounds = getWeekBounds(endWeekOffset);
     
     final startDate = currentBounds[0]; 
     final endDate = nextBounds[1];      
@@ -159,6 +159,9 @@ class ChoreService {
       debugPrint(
         "Zero-sum points successfully distributed!",
       ); // FIXED: Using debugPrint
+
+      // 8. Recalculate next week's schedule with the new points
+      await recalculateSchedule(roomId, startWeekOffset: 1, endWeekOffset: 1);
     } catch (e) {
       debugPrint("Error processing chore math: $e"); // FIXED: Using debugPrint
       rethrow;
@@ -219,6 +222,9 @@ class ChoreService {
 
       await batch.commit();
       debugPrint("Zero-sum points successfully reverted!");
+
+      // Recalculate next week's schedule with the reverted points
+      await recalculateSchedule(roomId, startWeekOffset: 1, endWeekOffset: 1);
     } catch (e) {
       debugPrint("Error reverting chore math: $e");
       rethrow;
@@ -232,7 +238,13 @@ class ChoreService {
   }) async {
     try {
       // 1. Fetch users
-      final usersSnapshot = await _db.collection('users').where('roomId', isEqualTo: roomId).get();
+      final usersSnapshot = await _db
+          .collection('users')
+          .where(Filter.or(
+            Filter('roomId', isEqualTo: roomId),
+            Filter('roomIds', arrayContains: roomId)
+          ))
+          .get();
       List<Map<String, dynamic>> users = usersSnapshot.docs.map((doc) {
         var data = doc.data();
         data['id'] = doc.id;
@@ -255,6 +267,22 @@ class ChoreService {
       
       List<Map<String, dynamic>> absences = absencesSnapshot.docs.map((doc) => doc.data()).toList();
 
+      // 4. Fetch existing assignments to avoid duplicates
+      final existingAssignmentsSnapshot = await _db.collection('assignments')
+          .where('roomId', isEqualTo: roomId)
+          .get();
+
+      Set<String> existingChoreDays = {};
+      for (var doc in existingAssignmentsSnapshot.docs) {
+        final data = doc.data();
+        final date = (data['date'] as Timestamp).toDate();
+        if (date.compareTo(startDate) >= 0 && date.compareTo(endDate) <= 0) {
+          final String cId = data['choreId'];
+          final String dStr = data['day'];
+          existingChoreDays.add("${cId}_$dStr");
+        }
+      }
+
       final batch = _db.batch();
       final int daysDiff = endDate.difference(startDate).inDays;
 
@@ -276,6 +304,11 @@ class ChoreService {
         for (var chore in dailyChores) {
           int freq = chore['frequencyDays'] ?? 7;
           if (i % freq != 0) continue;
+
+          // Skip if an assignment already exists for this chore on this day
+          if (existingChoreDays.contains("${chore['id']}_$dayString")) {
+            continue;
+          }
 
           // Find available users
           List<Map<String, dynamic>> availableUsers = users.where((u) {
