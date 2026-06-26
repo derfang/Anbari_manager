@@ -112,21 +112,14 @@ class _ManageChoresScreenState extends State<ManageChoresScreen> {
                       onChanged: (val) => setDialogState(() => effortPoints = val),
                     ),
                     
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text("Crew Needed:"),
-                        DropdownButton<int>(
-                          value: crewNeeded,
-                          items: [1, 2, 3].map((int value) {
-                            return DropdownMenuItem<int>(
-                              value: value,
-                              child: Text("$value Person${value > 1 ? 's' : ''}"),
-                            );
-                          }).toList(),
-                          onChanged: (val) => setDialogState(() => crewNeeded = val!),
-                        ),
-                      ],
+                    Text("Crew Needed: $crewNeeded Person${crewNeeded > 1 ? 's' : ''}"),
+                    Slider(
+                      value: crewNeeded.toDouble(),
+                      min: 1,
+                      max: 4,
+                      divisions: 3,
+                      label: "$crewNeeded",
+                      onChanged: (val) => setDialogState(() => crewNeeded = val.round()),
                     ),
 
                     Text("Frequency: Every $frequencyDays day${frequencyDays > 1 ? 's' : ''}"),

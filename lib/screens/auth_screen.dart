@@ -19,13 +19,14 @@ class _AuthScreenState extends State<AuthScreen> {
     try {
       if (kIsWeb) {
         GoogleAuthProvider authProvider = GoogleAuthProvider();
-        await _auth.signInWithPopup(authProvider);
+        final result = await _auth.signInWithPopup(authProvider);
+        if (result.user != null) {
+          print("Google Sign In Success: ${result.user?.email}");
+        }
       } else {
         try {
           await GoogleSignIn.instance.initialize();
-        } catch (e) {
-          // Ignored if already initialized
-        }
+        } catch (e) {}
         
         final GoogleSignInAccount? googleUser = await GoogleSignIn.instance.authenticate();
         if (googleUser == null) {
@@ -40,13 +41,16 @@ class _AuthScreenState extends State<AuthScreen> {
 
         await _auth.signInWithCredential(credential);
       }
-      // AuthWrapper will automatically detect the state change and route to RoomGateWrapper
+      // Give the stream a moment to update
+      await Future.delayed(const Duration(seconds: 2));
+      if (mounted) setState(() => _isLoading = false);
     } catch (e) {
-      if (!mounted) return;
-      setState(() => _isLoading = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Google Sign-In Failed: $e")),
-      );
+      if (mounted) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Google Sign-In Failed: $e")),
+        );
+      }
     }
   }
 

@@ -61,6 +61,7 @@ class _RoomSelectionScreenState extends State<RoomSelectionScreen> {
       body: StreamBuilder<DocumentSnapshot>(
         stream: _db.collection('users').doc(user.uid).snapshots(),
         builder: (context, snapshot) {
+          if (snapshot.hasError) return Scaffold(body: Center(child: Text("Error loading rooms: ${snapshot.error}")));
           if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
           
           Map<String, dynamic>? userData = snapshot.data!.data() as Map<String, dynamic>?;

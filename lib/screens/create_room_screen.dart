@@ -36,6 +36,7 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
       {'title': 'Clean the Bathroom', 'icon': 'shower', 'points': 3.0, 'crew': 1, 'frequencyDays': 7, 'roomId': roomId},
       {'title': 'Sweep & Mop Floors', 'icon': 'wash', 'points': 2.0, 'crew': 1, 'frequencyDays': 7, 'roomId': roomId},
       {'title': 'Wipe Kitchen Counters', 'icon': 'kitchen', 'points': 1.0, 'crew': 1, 'frequencyDays': 1, 'roomId': roomId},
+      {'title': 'Vacuum the Apartment', 'icon': 'cleaning_services', 'points': 2.0, 'crew': 1, 'frequencyDays': 7, 'roomId': roomId},
     ];
 
     final batch = _db.batch();

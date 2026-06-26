@@ -17,6 +17,10 @@ class RoomGateWrapper extends StatelessWidget {
     return StreamBuilder<DocumentSnapshot>(
       stream: FirebaseFirestore.instance.collection('users').doc(user.uid).snapshots(),
       builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return Scaffold(body: Center(child: Text("Database Error: ${snapshot.error}. You may need to logout and log back in.")));
+        }
+
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(body: Center(child: CircularProgressIndicator()));
         }
