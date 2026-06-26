@@ -9,6 +9,9 @@ import 'room_settings_screen.dart';
 import '../services/chore_service.dart';
 import 'room_selection_screen.dart';
 import '../utils/chore_icons.dart';
+import '../services/finance_service.dart';
+import 'finances_screen.dart';
+import 'add_expense_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   final String? roomId;
@@ -958,6 +961,80 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           trailing: Text("${points.toStringAsFixed(1)} pts", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                         );
                       },
+                    ),
+                  );
+                },
+              ),
+
+              const SizedBox(height: 32),
+              const Text("Room Finances", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 12),
+              FutureBuilder<Map<String, double>>(
+                future: FinanceService().calculateNetBalances(_roomId!),
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const Card(child: Padding(padding: EdgeInsets.all(24.0), child: Center(child: CircularProgressIndicator())));
+                  }
+                  
+                  double myBalance = snapshot.data?[_auth.currentUser?.uid] ?? 0.0;
+                  
+                  return Card(
+                    elevation: 2,
+                    child: Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Row(
+                            children: [
+                              CircleAvatar(
+                                backgroundColor: myBalance >= 0 ? Colors.green.shade100 : Colors.red.shade100,
+                                child: Icon(Icons.account_balance_wallet, color: myBalance >= 0 ? Colors.green : Colors.red),
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(myBalance > 0 
+                                      ? "You are owed \$${myBalance.toStringAsFixed(2)} in total" 
+                                      : (myBalance < 0 
+                                          ? "You owe \$${myBalance.abs().toStringAsFixed(2)} in total" 
+                                          : "You are totally settled up!"), 
+                                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)
+                                    ),
+                                    const Text("Across all room expenses.", style: TextStyle(color: Colors.grey, fontSize: 13)),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 16),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: FilledButton.icon(
+                                  onPressed: () {
+                                    Navigator.push(context, MaterialPageRoute(builder: (_) => AddExpenseScreen(roomId: _roomId!))).then((_) => setState(() {}));
+                                  },
+                                  icon: const Icon(Icons.add),
+                                  label: const Text("Add Expense"),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: OutlinedButton.icon(
+                                  onPressed: () {
+                                    Navigator.push(context, MaterialPageRoute(builder: (_) => FinancesScreen(roomId: _roomId!))).then((_) => setState(() {}));
+                                  },
+                                  icon: const Icon(Icons.receipt_long),
+                                  label: const Text("View Details"),
+                                ),
+                              ),
+                            ],
+                          )
+                        ],
+                      ),
                     ),
                   );
                 },
