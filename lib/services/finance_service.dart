@@ -29,12 +29,18 @@ class FinanceService {
       throw Exception("Splits do not sum to total amount.");
     }
 
+    Map<String, String> approvals = {};
+    splits.keys.forEach((userId) {
+      approvals[userId] = (userId == createdBy || userId == paidBy) ? 'approved' : 'pending';
+    });
+
     await _db.collection('expenses').add({
       'roomId': roomId,
       'description': description,
       'amount': amount,
       'paidBy': paidBy,
       'splits': splits,
+      'approvals': approvals,
       'date': FieldValue.serverTimestamp(),
       'createdBy': createdBy,
     });
@@ -46,17 +52,30 @@ class FinanceService {
     required double amount,
     required String paidBy,
     required Map<String, double> splits,
+    required String editedBy,
   }) async {
     double sum = splits.values.fold(0, (prev, curr) => prev + curr);
     if ((sum - amount).abs() > 0.5) {
       throw Exception("Splits do not sum to total amount.");
     }
 
+    Map<String, String> approvals = {};
+    splits.keys.forEach((userId) {
+      approvals[userId] = (userId == editedBy || userId == paidBy) ? 'approved' : 'pending';
+    });
+
     await _db.collection('expenses').doc(expenseId).update({
       'description': description,
       'amount': amount,
       'paidBy': paidBy,
       'splits': splits,
+      'approvals': approvals,
+    });
+  }
+
+  Future<void> updateExpenseApproval(String expenseId, String userId, String status) async {
+    await _db.collection('expenses').doc(expenseId).update({
+      'approvals.$userId': status,
     });
   }
 
@@ -89,13 +108,23 @@ class FinanceService {
       final splits = Map<String, dynamic>.from(data['splits']);
       final amount = (data['amount'] as num).toDouble();
 
-      // Person who paid gets credited the full amount
-      balances[paidBy] = (balances[paidBy] ?? 0.0) + amount;
+      final approvals = data.containsKey('approvals') ? Map<String, String>.from(data['approvals']) : <String, String>{};
 
-      // Everyone (including payer) gets debited their split share
+      // Person who paid gets credited the full amount, BUT ONLY for the approved splits
+      // Actually, wait! The payer only paid out of pocket. Their "credit" towards others only counts if the others approved.
+      // So payer gets credited the sum of all *approved* splits (plus their own share if approved, but payer's own share is auto-approved).
+      
+      double approvedTotal = 0;
       splits.forEach((userId, share) {
-        balances[userId] = (balances[userId] ?? 0.0) - (share as num).toDouble();
+        String status = approvals[userId] ?? 'approved'; // Legacy expenses are implicitly approved
+        if (status == 'approved') {
+          balances[userId] = (balances[userId] ?? 0.0) - (share as num).toDouble();
+          approvedTotal += (share as num).toDouble();
+        }
       });
+
+      // Credit the payer for the total of all approved splits
+      balances[paidBy] = (balances[paidBy] ?? 0.0) + approvedTotal;
     }
 
     for (var doc in settlementsQuery.docs) {
@@ -167,6 +196,25 @@ class FinanceService {
     }
 
     return debts;
+  }
+
+  Stream<List<Map<String, dynamic>>> getPendingExpensesStream(String roomId, String userId) {
+    return _db.collection('expenses').where('roomId', isEqualTo: roomId).snapshots().map((snapshot) {
+      List<Map<String, dynamic>> pending = [];
+      for (var doc in snapshot.docs) {
+        final data = doc.data();
+        if (data.containsKey('approvals')) {
+          final approvals = Map<String, dynamic>.from(data['approvals']);
+          if (approvals[userId] == 'pending') {
+            pending.add({
+              'id': doc.id,
+              ...data,
+            });
+          }
+        }
+      }
+      return pending;
+    });
   }
 
   Future<void> deleteTransaction(String collection, String docId) async {

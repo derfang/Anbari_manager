@@ -190,8 +190,8 @@ class _AbsenceScreenState extends State<AbsenceScreen> {
                       return Card(
                         child: ListTile(
                           leading: Icon(
-                            status == 'approved' ? Icons.check_circle : Icons.pending,
-                            color: status == 'approved' ? Colors.green : Colors.orange,
+                            status == 'approved' ? Icons.check_circle : (status == 'declined' ? Icons.cancel : Icons.pending),
+                            color: status == 'approved' ? Colors.green : (status == 'declined' ? Colors.red : Colors.orange),
                           ),
                           title: Text(_isAdmin
                               ? "${data['userName']} · ${DateFormat('MMM d').format(start)} - ${DateFormat('MMM d').format(end)}"

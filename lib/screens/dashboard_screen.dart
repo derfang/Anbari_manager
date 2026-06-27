@@ -456,6 +456,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       actions: [
                         TextButton(
                           onPressed: () async {
+                            await doc.reference.update({'status': 'declined'});
+                          },
+                          child: const Text("IGNORE"),
+                        ),
+                        TextButton(
+                          onPressed: () async {
                             try {
                               await _choreService.approveAbsenceAndRecalculate(
                                 absenceDocRef: doc.reference,
@@ -969,6 +975,57 @@ class _DashboardScreenState extends State<DashboardScreen> {
               const SizedBox(height: 32),
               const Text("Room Finances", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
               const SizedBox(height: 12),
+              
+              StreamBuilder<List<Map<String, dynamic>>>(
+                stream: FinanceService().getPendingExpensesStream(_roomId!, _auth.currentUser!.uid),
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting || !snapshot.hasData || snapshot.data!.isEmpty) {
+                    return const SizedBox.shrink();
+                  }
+                  
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const Text("Pending Approvals", style: TextStyle(fontWeight: FontWeight.w600, color: Colors.orange)),
+                      const SizedBox(height: 8),
+                      ...snapshot.data!.map((expense) {
+                        double myShare = (expense['splits'][_auth.currentUser!.uid] as num).toDouble();
+                        return Card(
+                          color: Colors.orange.shade50,
+                          elevation: 1,
+                          margin: const EdgeInsets.only(bottom: 12),
+                          child: ListTile(
+                            leading: const Icon(Icons.pending_actions, color: Colors.orange),
+                            title: Text(expense['description']),
+                            subtitle: Text("You are charged \$${myShare.toStringAsFixed(2)}"),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  icon: const Icon(Icons.check_circle, color: Colors.green),
+                                  onPressed: () async {
+                                    await FinanceService().updateExpenseApproval(expense['id'], _auth.currentUser!.uid, 'approved');
+                                    setState(() {});
+                                  },
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.cancel, color: Colors.red),
+                                  onPressed: () async {
+                                    await FinanceService().updateExpenseApproval(expense['id'], _auth.currentUser!.uid, 'declined');
+                                    setState(() {});
+                                  },
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      }),
+                      const SizedBox(height: 12),
+                    ],
+                  );
+                },
+              ),
+
               FutureBuilder<Map<String, double>>(
                 future: FinanceService().calculateNetBalances(_roomId!),
                 builder: (context, snapshot) {

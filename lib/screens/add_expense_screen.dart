@@ -317,6 +317,7 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
           amount: _amount,
           paidBy: _paidByUserId!,
           splits: finalSplits,
+          editedBy: _auth.currentUser!.uid,
         );
       } else {
         await _financeService.addExpense(
