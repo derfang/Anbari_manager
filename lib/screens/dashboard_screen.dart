@@ -810,7 +810,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             const DataColumn(label: Text('Chore', style: TextStyle(fontWeight: FontWeight.bold))),
                             // Generate columns dynamically for Sat -> Fri
                             ..._weekDays.map((day) => DataColumn(
-                                  label: Text(day.substring(0, 3), style: const TextStyle(fontWeight: FontWeight.bold)),
+                                  label: Expanded(
+                                    child: Text(
+                                      day.substring(0, 3), 
+                                      style: const TextStyle(fontWeight: FontWeight.bold),
+                                      textAlign: TextAlign.center,
+                                    ),
+                                  ),
                                 )),
                           ],
                           rows: chores.map((chore) {
