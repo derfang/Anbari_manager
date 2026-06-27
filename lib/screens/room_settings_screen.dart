@@ -203,9 +203,24 @@ class _RoomSettingsScreenState extends State<RoomSettingsScreen> {
                           subtitle: Text("${data['points']?.toStringAsFixed(1) ?? '0.0'} pts"),
                           trailing: isMe 
                             ? const Chip(label: Text("You"))
-                            : (_isAdmin ? IconButton(
-                                icon: const Icon(Icons.person_remove, color: Colors.red),
-                                onPressed: () => _removeUser(doc.id, data['name']),
+                            : (_isAdmin ? PopupMenuButton<String>(
+                                onSelected: (value) {
+                                  if (value == 'remove') {
+                                    _removeUser(doc.id, data['name']);
+                                  } else if (value == 'absent') {
+                                    _markAbsent(doc.id, data['name'] ?? 'Unknown');
+                                  }
+                                },
+                                itemBuilder: (context) => [
+                                  const PopupMenuItem(
+                                    value: 'absent',
+                                    child: Row(children: [Icon(Icons.date_range, color: Colors.orange, size: 20), SizedBox(width: 8), Text("Mark Absent")]),
+                                  ),
+                                  const PopupMenuItem(
+                                    value: 'remove',
+                                    child: Row(children: [Icon(Icons.person_remove, color: Colors.red, size: 20), SizedBox(width: 8), Text("Remove User", style: TextStyle(color: Colors.red))]),
+                                  ),
+                                ],
                               ) : null),
                         ),
                       );
@@ -243,6 +258,46 @@ class _RoomSettingsScreenState extends State<RoomSettingsScreen> {
         ),
       ),
     );
+  }
+
+  Future<void> _markAbsent(String userId, String userName) async {
+    final picked = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime.now(),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+    );
+
+    if (picked != null) {
+      setState(() => _isLoading = true);
+      try {
+        final docRef = await _db.collection('absences').add({
+          'userId': userId,
+          'userName': userName,
+          'roomId': _roomId,
+          'startDate': Timestamp.fromDate(picked.start),
+          'endDate': Timestamp.fromDate(picked.end),
+          'status': 'approved',
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+        
+        await _choreService.approveAbsenceAndRecalculate(
+          absenceDocRef: docRef,
+          roomId: _roomId!,
+          currentUserId: _auth.currentUser!.uid,
+          startDate: picked.start,
+          endDate: picked.end,
+        );
+        
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("$userName marked as absent.")));
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
+        }
+      }
+      setState(() => _isLoading = false);
+    }
   }
 
   Future<void> _resetRoom() async {
