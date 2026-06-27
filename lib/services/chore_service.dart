@@ -312,7 +312,9 @@ class ChoreService {
 
           // Find available users
           List<Map<String, dynamic>> availableUsers = users.where((u) {
-            bool isAbsent = absences.any((a) {
+            if (u['isAbsent'] == true) return false;
+
+            bool isAbsentTemp = absences.any((a) {
               if (a['userId'] != u['id']) return false;
               DateTime aStart = (a['startDate'] as Timestamp).toDate();
               DateTime aEnd = (a['endDate'] as Timestamp).toDate();
@@ -323,7 +325,7 @@ class ChoreService {
 
               return normCurrent.compareTo(normStart) >= 0 && normCurrent.compareTo(normEnd) <= 0;
             });
-            return !isAbsent;
+            return !isAbsentTemp;
           }).toList();
 
           if (availableUsers.isEmpty) continue;
