@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart'; // Required for debugPrint
 import 'dart:math';
+import 'fcm_service.dart';
 
 class ChoreService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
@@ -237,6 +238,8 @@ class ChoreService {
     required DateTime endDate,
   }) async {
     try {
+      Map<String, int> assignmentsPerUser = {};
+
       // 1. Fetch users
       final usersSnapshot = await _db
           .collection('users')
@@ -362,12 +365,24 @@ class ChoreService {
             // Simulate point increase
             double chorePoints = (chore['points'] ?? 1).toDouble();
             assignedUser['points'] = (assignedUser['points'] ?? 0).toDouble() + chorePoints;
+
+            assignmentsPerUser[assignedUser['id']] = (assignmentsPerUser[assignedUser['id']] ?? 0) + 1;
           }
         }
       }
       
       await batch.commit();
       debugPrint("Weekly schedule generated client-side!");
+
+      // Notify users about their new assignments
+      for (var userId in assignmentsPerUser.keys) {
+        int count = assignmentsPerUser[userId]!;
+        FCMService.sendPushToUser(
+          uid: userId,
+          title: "New Chores Assigned 🧹",
+          body: "You've been assigned $count chore${count > 1 ? 's' : ''} this week! Don't let the house turn into a swamp. 🐊",
+        );
+      }
     } catch (e) {
       debugPrint("Error generating schedule: $e");
       rethrow;

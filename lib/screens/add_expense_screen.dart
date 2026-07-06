@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../services/finance_service.dart';
+import '../services/fcm_service.dart';
 
 enum SplitType { equal, exact, percentage, mixed }
 
@@ -328,6 +329,22 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
           splits: finalSplits,
           createdBy: _auth.currentUser!.uid,
         );
+
+        // Send notifications to everyone involved except the current user
+        for (var userId in finalSplits.keys) {
+          if (userId != _auth.currentUser!.uid) {
+            double amountOwed = finalSplits[userId]!;
+            try {
+              FCMService.sendPushToUser(
+                uid: userId,
+                title: "New Room Expense 💸",
+                body: "You've been charged \$${amountOwed.toStringAsFixed(2)} for '$_description'. Go approve it!",
+              );
+            } catch (e) {
+              // ignore
+            }
+          }
+        }
       }
       
       if (mounted) {

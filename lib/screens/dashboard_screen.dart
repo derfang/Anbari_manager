@@ -12,6 +12,8 @@ import '../utils/chore_icons.dart';
 import '../services/finance_service.dart';
 import 'finances_screen.dart';
 import 'add_expense_screen.dart';
+import '../services/fcm_service.dart';
+import '../services/notification_service.dart';
 
 class DashboardScreen extends StatefulWidget {
   final String? roomId;
@@ -68,6 +70,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
           }
           _isLoading = false;
         });
+        
+        // Initialize notifications (requests permission and saves FCM token)
+        await NotificationService().initialize();
         
         // Background cleanup of old weeks
         if (_roomId != null && _roomId!.isNotEmpty) {
@@ -185,6 +190,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   'type': 'false_completion',
                   'createdAt': FieldValue.serverTimestamp(),
                 });
+
+                // Notify the slacker
+                try {
+                  final assignmentDoc = await _db.collection('assignments').doc(assignmentId).get();
+                  if (assignmentDoc.exists) {
+                    final data = assignmentDoc.data() as Map<String, dynamic>;
+                    final slackerId = data['assignedToUserId'];
+                    if (slackerId != null) {
+                      FCMService.sendPushToUser(
+                        uid: slackerId,
+                        title: "BUSTED! 🚨",
+                        body: "Someone flagged your '$choreTitle' as not actually done. The council will decide your fate.",
+                      );
+                    }
+                  }
+                } catch (e) {
+                  // ignore
+                }
                 if (1 >= threshold) await _undoAssignment(assignmentId);
               },
               child: const Text("Report"),
@@ -627,6 +650,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   seenChores.add(choreId);
                   return true;
                 }).toList();
+
+                // Notification Logic moved to Cloudflare Cron Job
 
                 if (myTasks.isEmpty) {
                   return const Card(

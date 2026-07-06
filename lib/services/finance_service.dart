@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'fcm_service.dart';
 
 class SimplifiedDebt {
   final String fromUserId;
@@ -44,6 +45,17 @@ class FinanceService {
       'date': FieldValue.serverTimestamp(),
       'createdBy': createdBy,
     });
+
+    // Notify users who need to approve
+    for (var userId in splits.keys) {
+      if (approvals[userId] == 'pending') {
+        FCMService.sendPushToUser(
+          uid: userId,
+          title: "New Expense 💸",
+          body: "You've been charged \$${splits[userId]?.toStringAsFixed(2)} for '$description'. Time to pay up!",
+        );
+      }
+    }
   }
 
   Future<void> updateExpense({
@@ -77,6 +89,30 @@ class FinanceService {
     await _db.collection('expenses').doc(expenseId).update({
       'approvals.$userId': status,
     });
+
+    if (status == 'declined') {
+      try {
+        final doc = await _db.collection('expenses').doc(expenseId).get();
+        if (doc.exists) {
+          final data = doc.data() as Map<String, dynamic>;
+          final createdBy = data['createdBy'] ?? data['paidBy'];
+          final amount = data['amount'];
+          final title = data['description'];
+          
+          if (createdBy != null && createdBy != userId) {
+            // We don't have the user's name easily here without another query, 
+            // so we'll just say "A roommate". In a real app we'd fetch the user profile.
+            FCMService.sendPushToUser(
+              uid: createdBy,
+              title: "Expense Declined 😬",
+              body: "Oof. Someone declined your \$$amount charge for '$title'. Awkward...",
+            );
+          }
+        }
+      } catch (e) {
+        // Ignore error
+      }
+    }
   }
 
   Future<void> addSettlement({

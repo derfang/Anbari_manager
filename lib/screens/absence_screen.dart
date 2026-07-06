@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
+import '../services/fcm_service.dart';
 
 class AbsenceScreen extends StatefulWidget {
   const AbsenceScreen({super.key});
@@ -83,6 +84,23 @@ class _AbsenceScreenState extends State<AbsenceScreen> {
         'status': 'pending',
         'createdAt': FieldValue.serverTimestamp(),
       });
+
+      // Notify admins
+      try {
+        final adminsSnapshot = await _db.collection('users')
+            .where('roomIds', arrayContains: _roomId ?? userDoc['roomId'])
+            .where('role', isEqualTo: 'admin')
+            .get();
+        for (var adminDoc in adminsSnapshot.docs) {
+          FCMService.sendPushToUser(
+            uid: adminDoc.id,
+            title: "Absence Request 🏖️",
+            body: "${userDoc['name']} is requesting an absence. Must be nice! Go approve or decline it.",
+          );
+        }
+      } catch (e) {
+        // ignore
+      }
 
       setState(() {
         _startDate = null;
