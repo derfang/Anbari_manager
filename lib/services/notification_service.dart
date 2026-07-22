@@ -45,7 +45,7 @@ Future<void> _showLocalNotification(RemoteMessage message, FlutterLocalNotificat
     if (imageName == null || imageName.isEmpty) {
       final lowerTitle = title.toLowerCase();
       final lowerBody = body.toLowerCase();
-      if (lowerTitle.contains('expense')) {
+      if (lowerTitle.contains('expense') || lowerTitle.contains('approval') || lowerTitle.contains('declined') || lowerTitle.contains('charge') || lowerBody.contains('charge')) {
         imageName = 'new_expense';
       } else if (lowerTitle.contains('trash') || lowerBody.contains('trash')) {
         imageName = 'chore_trash';
@@ -62,17 +62,10 @@ Future<void> _showLocalNotification(RemoteMessage message, FlutterLocalNotificat
       }
     }
     
-    if (imageName != null && imageName.isNotEmpty) {
-      final sender = Person(
-        name: 'Roommate Chores',
-        icon: DrawableResourceAndroidIcon(imageName),
-      );
-      styleInfo = MessagingStyleInformation(
-        const Person(name: 'Me'),
-        conversationTitle: title,
-        messages: [
-          Message(body, DateTime.now(), sender),
-        ],
+    if (title != null && body != null) {
+      styleInfo = BigTextStyleInformation(
+        body,
+        contentTitle: title,
       );
     }
 
@@ -85,6 +78,9 @@ Future<void> _showLocalNotification(RemoteMessage message, FlutterLocalNotificat
       category: AndroidNotificationCategory.message,
       sound: const RawResourceAndroidNotificationSound('new_notification'),
       styleInformation: styleInfo,
+      largeIcon: imageName != null && imageName.isNotEmpty 
+          ? DrawableResourceAndroidBitmap(imageName) 
+          : null,
     );
 
     final platformChannelSpecifics = NotificationDetails(android: androidPlatformChannelSpecifics);

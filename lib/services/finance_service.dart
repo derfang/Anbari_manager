@@ -90,28 +90,43 @@ class FinanceService {
       'approvals.$userId': status,
     });
 
-    if (status == 'declined') {
-      try {
-        final doc = await _db.collection('expenses').doc(expenseId).get();
-        if (doc.exists) {
-          final data = doc.data() as Map<String, dynamic>;
-          final createdBy = data['createdBy'] ?? data['paidBy'];
-          final amount = data['amount'];
-          final title = data['description'];
-          
-          if (createdBy != null && createdBy != userId) {
-            // We don't have the user's name easily here without another query, 
-            // so we'll just say "A roommate". In a real app we'd fetch the user profile.
-            FCMService.sendPushToUser(
-              uid: createdBy,
-              title: "Expense Declined 😬",
-              body: "Oof. Someone declined your \$$amount charge for '$title'. Awkward...",
-            );
+    try {
+      final doc = await _db.collection('expenses').doc(expenseId).get();
+      if (doc.exists) {
+        final data = doc.data() as Map<String, dynamic>;
+        final createdBy = data['createdBy'] ?? data['paidBy'];
+        final amount = data['amount'];
+        final title = data['description'];
+
+        if (status == 'declined' && createdBy != null && createdBy != userId) {
+          String actionUserName = "A roommate";
+          final userDoc = await _db.collection('users').doc(userId).get();
+          if (userDoc.exists) {
+             actionUserName = userDoc.data()?['name'] ?? "A roommate";
           }
+
+          FCMService.sendPushToUser(
+            uid: createdBy,
+            title: "Expense Declined 😬",
+            body: "Oof. $actionUserName declined your \$$amount charge for '$title'. Awkward...",
+          );
+        } else if (status == 'pending' && createdBy != null && createdBy != userId) {
+          // Re-request approval notification
+          String requesterName = "A roommate";
+          final reqDoc = await _db.collection('users').doc(createdBy).get();
+          if (reqDoc.exists) {
+             requesterName = reqDoc.data()?['name'] ?? "A roommate";
+          }
+          
+          FCMService.sendPushToUser(
+            uid: userId,
+            title: "Approval Re-requested 💸",
+            body: "$requesterName re-requested your approval for the \$$amount charge: '$title'. Please review it!",
+          );
         }
-      } catch (e) {
-        // Ignore error
       }
+    } catch (e) {
+      // Ignore error
     }
   }
 

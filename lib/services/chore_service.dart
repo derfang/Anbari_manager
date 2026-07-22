@@ -399,15 +399,7 @@ class ChoreService {
       await batch.commit();
       debugPrint("Weekly schedule generated client-side!");
 
-      // Notify users about their new assignments
-      for (var userId in assignmentsPerUser.keys) {
-        int count = assignmentsPerUser[userId]!;
-        FCMService.sendPushToUser(
-          uid: userId,
-          title: "New Chores Assigned 🧹",
-          body: "You've been assigned $count chore${count > 1 ? 's' : ''} this week! Don't let the house turn into a swamp. 🐊",
-        );
-      }
+      // Notification for new assignments has been disabled based on user request.
     } catch (e) {
       debugPrint("Error generating schedule: $e");
       rethrow;
