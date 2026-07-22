@@ -68,13 +68,18 @@ async function getAccessToken(serviceAccount) {
 }
 
 // Sends a single push notification via FCM
-async function sendFCMMessage(projectId, accessToken, token, title, body) {
+async function sendFCMMessage(projectId, accessToken, token, title, body, imageUrl = null) {
   const fcmPayload = {
     message: {
       token: token,
-      notification: { title: title, body: body },
-      android: { priority: 'high' },
-      apns: { payload: { aps: { sound: 'default' } } }
+      android: { 
+        priority: 'high'
+      },
+      data: {
+        title: title,
+        body: body,
+        image: imageUrl || ""
+      }
     }
   };
 
@@ -104,6 +109,16 @@ export default {
       });
     }
 
+    if (request.method === 'GET') {
+      const url = new URL(request.url);
+      if (url.pathname === '/') {
+        return new Response('Anbari Manager Worker - Version 1.1 (Data-Only Agent)', { 
+          status: 200,
+          headers: { 'Content-Type': 'text/plain', 'Access-Control-Allow-Origin': '*' }
+        });
+      }
+    }
+
     if (request.method !== 'POST') {
       return new Response('Method not allowed', { 
         status: 405,
@@ -122,6 +137,10 @@ export default {
         });
       }
 
+      // We no longer determine the image on the backend.
+      // The Flutter app will parse the title and body to pick the right icon!
+      let imageName = null;
+
       const serviceAccountStr = env.SERVICE_ACCOUNT_JSON;
       if (!serviceAccountStr) return new Response('SERVICE_ACCOUNT_JSON missing', { 
         status: 500,
@@ -130,7 +149,7 @@ export default {
       const serviceAccount = JSON.parse(serviceAccountStr);
 
       const accessToken = await getAccessToken(serviceAccount);
-      const success = await sendFCMMessage(serviceAccount.project_id, accessToken, token, title, messageBody);
+      const success = await sendFCMMessage(serviceAccount.project_id, accessToken, token, title, messageBody, imageName);
 
       return new Response(JSON.stringify({ success }), { 
         status: success ? 200 : 500,
@@ -232,7 +251,9 @@ export default {
               : `It's getting late and '${firstChore}' isn't done... the trash bags are starting to form a union. 🗑️`;
             
             console.log(`Sending reminder to ${userId} for ${chores.length} chores.`);
-            await sendFCMMessage(projectId, accessToken, fcmToken, title, body);
+            
+            // The Flutter app determines the image based on title/body
+            await sendFCMMessage(projectId, accessToken, fcmToken, title, body, null);
           }
         }
       }

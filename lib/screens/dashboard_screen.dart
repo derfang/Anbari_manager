@@ -77,6 +77,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
         // Background cleanup of old weeks
         if (_roomId != null && _roomId!.isNotEmpty) {
           _choreService.cleanOldAssignments(_roomId!);
+          
+          // Silently ensure the current and next week's schedule is generated
+          _choreService.ensureScheduleGenerated(_roomId!);
         }
       }
     }

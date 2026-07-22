@@ -7,6 +7,96 @@ import 'package:timezone/data/latest_all.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
+// removed unused imports
+
+@pragma('vm:entry-point')
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  final FlutterLocalNotificationsPlugin localNotifs = FlutterLocalNotificationsPlugin();
+  
+  const AndroidInitializationSettings androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
+  const DarwinInitializationSettings iosSettings = DarwinInitializationSettings();
+  const InitializationSettings initSettings = InitializationSettings(android: androidSettings, iOS: iosSettings);
+  await localNotifs.initialize(settings: initSettings);
+
+  const AndroidNotificationChannel channel = AndroidNotificationChannel(
+    'roommate_chores_channel',
+    'Roommate Chores Notifications',
+    description: 'Notifications for chores and expenses',
+    importance: Importance.max,
+    sound: RawResourceAndroidNotificationSound('new_notification'),
+  );
+  
+  await localNotifs
+      .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+      ?.createNotificationChannel(channel);
+
+  await _showLocalNotification(message, localNotifs);
+}
+
+Future<void> _showLocalNotification(RemoteMessage message, FlutterLocalNotificationsPlugin plugin) async {
+  String? title = message.data['title'];
+  String? body = message.data['body'];
+  
+  if (title != null && body != null) {
+    StyleInformation? styleInfo;
+    String? imageName = message.data['image'];
+    
+    // Fallback: If backend didn't specify an image, let the app decide!
+    if (imageName == null || imageName.isEmpty) {
+      final lowerTitle = title.toLowerCase();
+      final lowerBody = body.toLowerCase();
+      if (lowerTitle.contains('expense')) {
+        imageName = 'new_expense';
+      } else if (lowerTitle.contains('trash') || lowerBody.contains('trash')) {
+        imageName = 'chore_trash';
+      } else if (lowerTitle.contains('bathroom') || lowerBody.contains('bathroom')) {
+        imageName = 'chore_bathroom';
+      } else if (lowerTitle.contains('mop') || lowerBody.contains('mop') || lowerTitle.contains('sweep') || lowerBody.contains('sweep')) {
+        imageName = 'chore_mop';
+      } else if (lowerTitle.contains('kitchen') || lowerBody.contains('kitchen')) {
+        imageName = 'chore_kitchen';
+      } else if (lowerTitle.contains('vacuum') || lowerBody.contains('vacuum')) {
+        imageName = 'chore_vacuum';
+      } else {
+        imageName = 'chore_reminder';
+      }
+    }
+    
+    if (imageName != null && imageName.isNotEmpty) {
+      final sender = Person(
+        name: 'Roommate Chores',
+        icon: DrawableResourceAndroidIcon(imageName),
+      );
+      styleInfo = MessagingStyleInformation(
+        const Person(name: 'Me'),
+        conversationTitle: title,
+        messages: [
+          Message(body, DateTime.now(), sender),
+        ],
+      );
+    }
+
+    final androidPlatformChannelSpecifics = AndroidNotificationDetails(
+      'roommate_chores_channel', 
+      'Roommate Chores Notifications',
+      channelDescription: 'Notifications for chores and expenses',
+      importance: Importance.max,
+      priority: Priority.high,
+      category: AndroidNotificationCategory.message,
+      sound: const RawResourceAndroidNotificationSound('new_notification'),
+      styleInformation: styleInfo,
+    );
+
+    final platformChannelSpecifics = NotificationDetails(android: androidPlatformChannelSpecifics);
+
+    await plugin.show(
+      id: message.hashCode,
+      title: title,
+      body: body,
+      notificationDetails: platformChannelSpecifics,
+    );
+  }
+}
 
 class NotificationService {
   static final NotificationService _instance = NotificationService._internal();
@@ -38,6 +128,19 @@ class NotificationService {
     
     await _localNotifs.initialize(settings: initSettings);
 
+    // Explicitly create the channel so background FCM messages can use it!
+    const AndroidNotificationChannel channel = AndroidNotificationChannel(
+      'roommate_chores_channel',
+      'Roommate Chores Notifications',
+      description: 'Notifications for chores and expenses',
+      importance: Importance.max,
+      sound: RawResourceAndroidNotificationSound('new_notification'),
+    );
+    
+    await _localNotifs
+        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+        ?.createNotificationChannel(channel);
+
     // Request permissions for push
     NotificationSettings settings = await _fcm.requestPermission(
       alert: true,
@@ -49,6 +152,14 @@ class NotificationService {
       debugPrint('User granted notification permission');
       await _saveTokenToDatabase();
     }
+
+    // Set up Firebase Messaging foreground listener
+    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      _showLocalNotification(message, _localNotifs);
+    });
+
+    // Set up Firebase Messaging background listener
+    FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
     _initialized = true;
   }

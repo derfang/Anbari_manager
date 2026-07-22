@@ -330,21 +330,6 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
           createdBy: _auth.currentUser!.uid,
         );
 
-        // Send notifications to everyone involved except the current user
-        for (var userId in finalSplits.keys) {
-          if (userId != _auth.currentUser!.uid) {
-            double amountOwed = finalSplits[userId]!;
-            try {
-              FCMService.sendPushToUser(
-                uid: userId,
-                title: "New Room Expense 💸",
-                body: "You've been charged \$${amountOwed.toStringAsFixed(2)} for '$_description'. Go approve it!",
-              );
-            } catch (e) {
-              // ignore
-            }
-          }
-        }
       }
       
       if (mounted) {

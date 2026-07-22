@@ -56,15 +56,17 @@ class ChoreService {
     try {
       final assignmentsSnapshot = await _db.collection('assignments')
           .where('roomId', isEqualTo: roomId)
-          .where('isCompleted', isEqualTo: false)
           .get();
 
       final batch = _db.batch();
       for (var doc in assignmentsSnapshot.docs) {
         try {
-          final date = (doc.data()['date'] as Timestamp).toDate();
-          if (date.compareTo(startDate) >= 0 && date.compareTo(endDate) <= 0) {
-            batch.delete(doc.reference);
+          final data = doc.data();
+          if (data['isCompleted'] == false) {
+            final date = (data['date'] as Timestamp).toDate();
+            if (date.compareTo(startDate) >= 0 && date.compareTo(endDate) <= 0) {
+              batch.delete(doc.reference);
+            }
           }
         } catch (_) {}
       }
@@ -78,6 +80,28 @@ class ChoreService {
     } catch (e) {
       debugPrint("Error recalculating schedule: $e");
       rethrow;
+    }
+  }
+
+  /// Silently checks and generates the current and next week's schedule if missing.
+  /// Unlike recalculateSchedule, this does NOT delete any uncompleted chores,
+  /// making it safe to run just-in-time when the Dashboard is opened.
+  Future<void> ensureScheduleGenerated(String roomId) async {
+    final currentBounds = getWeekBounds(0);
+    final nextBounds = getWeekBounds(1);
+    
+    final startDate = currentBounds[0]; 
+    final endDate = nextBounds[1];      
+
+    try {
+      await generateWeeklySchedule(
+        roomId: roomId,
+        startDate: startDate,
+        endDate: endDate,
+      );
+      debugPrint("Silently ensured schedule is generated for $roomId");
+    } catch (e) {
+      debugPrint("Error ensuring schedule is generated: $e");
     }
   }
 
@@ -97,10 +121,7 @@ class ChoreService {
       // 2. Fetch all users in the room
       final usersSnapshot = await _db
           .collection('users')
-          .where(Filter.or(
-            Filter('roomId', isEqualTo: roomId),
-            Filter('roomIds', arrayContains: roomId)
-          ))
+          .where('roomId', isEqualTo: roomId)
           .get();
 
       List<DocumentSnapshot> presentSlackers = [];
@@ -108,7 +129,11 @@ class ChoreService {
 
       // 3. Separate the guys doing the work from the guys on the couch
       for (var doc in usersSnapshot.docs) {
-        final data = doc.data();
+        final data = doc.data() as Map<String, dynamic>;
+        
+        // Handle alternative room inclusion
+        final List<dynamic> roomIds = data['roomIds'] ?? [];
+        if (data['roomId'] != roomId && !roomIds.contains(roomId)) continue;
 
         if (doerIds.contains(doc.id)) {
           doers.add(doc);
@@ -182,10 +207,7 @@ class ChoreService {
 
       final usersSnapshot = await _db
           .collection('users')
-          .where(Filter.or(
-            Filter('roomId', isEqualTo: roomId),
-            Filter('roomIds', arrayContains: roomId)
-          ))
+          .where('roomId', isEqualTo: roomId)
           .get();
 
       List<DocumentSnapshot> presentSlackers = [];
@@ -193,6 +215,11 @@ class ChoreService {
 
       for (var doc in usersSnapshot.docs) {
         final data = doc.data() as Map<String, dynamic>;
+        
+        // Handle alternative room inclusion
+        final List<dynamic> roomIds = data['roomIds'] ?? [];
+        if (data['roomId'] != roomId && !roomIds.contains(roomId)) continue;
+
         if (doerIds.contains(doc.id)) {
           doers.add(doc);
         } else if (data['isAbsent'] != true) {
@@ -243,10 +270,7 @@ class ChoreService {
       // 1. Fetch users
       final usersSnapshot = await _db
           .collection('users')
-          .where(Filter.or(
-            Filter('roomId', isEqualTo: roomId),
-            Filter('roomIds', arrayContains: roomId)
-          ))
+          .where('roomIds', arrayContains: roomId)
           .get();
       List<Map<String, dynamic>> users = usersSnapshot.docs.map((doc) {
         var data = doc.data();
@@ -265,10 +289,11 @@ class ChoreService {
       // 3. Fetch approved absences
       final absencesSnapshot = await _db.collection('absences')
           .where('roomId', isEqualTo: roomId)
-          .where('status', isEqualTo: 'approved')
           .get();
-      
-      List<Map<String, dynamic>> absences = absencesSnapshot.docs.map((doc) => doc.data()).toList();
+      List<Map<String, dynamic>> absences = absencesSnapshot.docs
+          .map((doc) => doc.data())
+          .where((data) => data['status'] == 'approved')
+          .toList();
 
       // 4. Fetch existing assignments to avoid duplicates
       final existingAssignmentsSnapshot = await _db.collection('assignments')
