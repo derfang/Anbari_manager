@@ -372,6 +372,9 @@ class ChoreService {
           List<Map<String, dynamic>> assignedUsers = availableUsers.take(crewNeeded).toList();
 
           for (var assignedUser in assignedUsers) {
+            int deadlineDays = chore['deadlineDays'] ?? 1;
+            DateTime endDay = currentDay.add(Duration(days: deadlineDays - 1));
+
             final assignmentRef = _db.collection('assignments').doc();
             batch.set(assignmentRef, {
               'roomId': roomId,
@@ -383,6 +386,8 @@ class ChoreService {
               'day': dayString,
               'dayOfWeek': dayOfWeek,
               'date': Timestamp.fromDate(currentDay),
+              'endDate': Timestamp.fromDate(endDay),
+              'deadlineDays': deadlineDays,
               'isCompleted': false,
               'createdAt': FieldValue.serverTimestamp(),
             });

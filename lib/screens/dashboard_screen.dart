@@ -795,8 +795,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       
                       final assignments = assignmentSnapshot.data!.docs.where((doc) {
                         try {
-                          final date = (doc['date'] as Timestamp).toDate();
-                          return date.compareTo(startBounds) >= 0 && date.compareTo(endBounds) <= 0;
+                          final data = doc.data() as Map<String, dynamic>;
+                          final date = (data['date'] as Timestamp).toDate();
+                          final endDate = data.containsKey('endDate') ? (data['endDate'] as Timestamp).toDate() : date;
+                          // Normalize to midnight
+                          final normStart = DateTime(startBounds.year, startBounds.month, startBounds.day);
+                          final normEnd = DateTime(endBounds.year, endBounds.month, endBounds.day);
+                          final aStart = DateTime(date.year, date.month, date.day);
+                          final aEnd = DateTime(endDate.year, endDate.month, endDate.day);
+                          
+                          return aStart.compareTo(normEnd) <= 0 && aEnd.compareTo(normStart) >= 0;
                         } catch (e) {
                           return false;
                         }
@@ -811,142 +819,215 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         );
                       }
 
-                      // Helper maps: "choreTitle_dayOfWeek" -> name / isCompleted / docId / userId
-                      Map<String, String> assignmentMap = {};
-                      Map<String, bool> completionMap = {};
-                      Map<String, String> assignmentDocIdMap = {};
-                      Map<String, String> assignedUserIdMap = {};
-                      Map<String, bool> disputedMap = {};
-                      for (var doc in assignments) {
-                        final data = doc.data() as Map<String, dynamic>;
-                        String key = "${data['choreId']}_${data['dayOfWeek']}";
-                        assignmentMap[key] = data['assignedToName'] ?? 'Unassigned';
-                        completionMap[key] = data['isCompleted'] == true;
-                        assignmentDocIdMap[key] = doc.id;
-                        assignedUserIdMap[key] = data['assignedToUserId'];
-                        disputedMap[key] = data['disputed'] == true;
-                      }
-
+                      // We build a custom grid
                       return SingleChildScrollView(
                         scrollDirection: Axis.horizontal,
-                        child: DataTable(
-                          border: TableBorder.all(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(8)),
-                          headingRowColor: WidgetStateProperty.all(Colors.teal.withOpacity(0.1)),
-                          columnSpacing: 0,
-                          horizontalMargin: 12,
-                          columns: [
-                            const DataColumn(label: Text('Chore', style: TextStyle(fontWeight: FontWeight.bold))),
-                            // Generate columns dynamically for Sat -> Fri
-                            ..._weekDays.map((day) => DataColumn(
-                                  label: Expanded(
-                                    child: Text(
-                                      day.substring(0, 3), 
-                                      style: const TextStyle(fontWeight: FontWeight.bold),
-                                      textAlign: TextAlign.center,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            border: Border.all(color: Colors.grey.shade300),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // Header Row
+                              Container(
+                                color: Colors.teal.withOpacity(0.1),
+                                child: Row(
+                                  children: [
+                                    Container(
+                                      width: 120,
+                                      padding: const EdgeInsets.all(12),
+                                      child: const Text('Chore', style: TextStyle(fontWeight: FontWeight.bold)),
                                     ),
-                                  ),
-                                )),
-                          ],
-                          rows: chores.map((chore) {
-                            return DataRow(
-                              cells: [
-                                DataCell(
-                                  Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(chore['title'], style: const TextStyle(fontWeight: FontWeight.w600)),
-                                      Text("${chore['points']} pts", style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
-                                    ],
-                                  ),
+                                    ...List.generate(7, (index) {
+                                      DateTime day = startBounds.add(Duration(days: index));
+                                      const List<String> weekDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+                                      String dayName = weekDays[day.weekday - 1];
+                                      
+                                      return Container(
+                                        width: 100, // Fixed width for each day cell
+                                        padding: const EdgeInsets.all(12),
+                                        decoration: BoxDecoration(
+                                          border: Border(left: BorderSide(color: Colors.grey.shade300)),
+                                        ),
+                                        child: Text(
+                                          dayName.substring(0, 3), 
+                                          textAlign: TextAlign.center, 
+                                          style: const TextStyle(fontWeight: FontWeight.bold)
+                                        ),
+                                      );
+                                    })
+                                  ],
                                 ),
-                                // Generate the inner cells intersecting chores with days
-                                ..._weekDays.map((day) {
-                                    final String lookupKey = "${chore.id}_$day";
-                                    final String assignedName = assignmentMap[lookupKey] ?? '-';
-                                    final bool isDone = completionMap[lookupKey] ?? false;
-                                    final String? assignmentDocId = assignmentDocIdMap[lookupKey];
-                                    final String? assignedUserId = assignedUserIdMap[lookupKey];
-                                    final bool isDisputed = disputedMap[lookupKey] ?? false;
+                              ),
+                              // Rows for each chore
+                              ...chores.map((chore) {
+                                List<Widget> cells = [];
+                                int skipDays = 0;
+
+                                for (int i = 0; i < 7; i++) {
+                                  if (skipDays > 0) {
+                                    skipDays--;
+                                    continue;
+                                  }
+
+                                  DateTime currentDay = startBounds.add(Duration(days: i));
+                                  final normCurrent = DateTime(currentDay.year, currentDay.month, currentDay.day);
+                                  
+                                  QueryDocumentSnapshot? activeAssign;
+                                  for (var doc in assignments) {
+                                    final data = doc.data() as Map<String, dynamic>;
+                                    if (data['choreId'] != chore.id) continue;
+
+                                    final aStart = (data['date'] as Timestamp).toDate();
+                                    final aEnd = data.containsKey('endDate') ? (data['endDate'] as Timestamp).toDate() : aStart;
+                                    final normAStart = DateTime(aStart.year, aStart.month, aStart.day);
+                                    final normAEnd = DateTime(aEnd.year, aEnd.month, aEnd.day);
+
+                                    if (normCurrent.compareTo(normAStart) >= 0 && normCurrent.compareTo(normAEnd) <= 0) {
+                                      activeAssign = doc;
+                                      break;
+                                    }
+                                  }
+
+                                  if (activeAssign != null) {
+                                    final data = activeAssign.data() as Map<String, dynamic>;
+                                    final aEnd = data.containsKey('endDate') ? (data['endDate'] as Timestamp).toDate() : (data['date'] as Timestamp).toDate();
+                                    final normAEnd = DateTime(aEnd.year, aEnd.month, aEnd.day);
+                                    
+                                    int daysRemainingInWeek = 7 - i;
+                                    int daysRemainingInAssignment = normAEnd.difference(normCurrent).inDays + 1;
+                                    int flex = daysRemainingInAssignment < daysRemainingInWeek ? daysRemainingInAssignment : daysRemainingInWeek;
+                                    
+                                    skipDays = flex - 1;
+
+                                    final String assignedName = data['assignedToName'] ?? '-';
+                                    final bool isDone = data['isCompleted'] == true;
+                                    final bool isDisputed = data['disputed'] == true;
+                                    final String assignmentDocId = activeAssign.id;
+                                    final String assignedUserId = data['assignedToUserId'];
                                     final bool isMyChore = assignedUserId == _auth.currentUser?.uid;
 
-                                    return DataCell(
-                                      Container(
-                                        width: double.infinity,
-                                        padding: const EdgeInsets.symmetric(horizontal: 12),
-                                        color: isDone ? Colors.green.shade300 : (isDisputed ? Colors.orange.shade100 : null),
-                                        alignment: Alignment.center,
-                                        child: Text(
-                                          assignedName,
-                                          style: TextStyle(
-                                            fontSize: 13,
-                                            fontWeight: assignedName != '-' ? FontWeight.bold : FontWeight.normal,
-                                            color: assignedName != '-' ? Colors.teal.shade700 : Colors.grey,
+                                    const List<String> weekDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+                                    cells.add(
+                                      InkWell(
+                                        onTap: () {
+                                          if (isDone) {
+                                            _showFalseReportDialog(
+                                              assignmentId: assignmentDocId,
+                                              choreTitle: chore['title'],
+                                              dayOfWeek: weekDays[currentDay.weekday - 1],
+                                            );
+                                          } else if (isDisputed) {
+                                            if (isMyChore) {
+                                              _requestCompletionVoteDialog(
+                                                assignmentId: assignmentDocId,
+                                                choreTitle: chore['title'],
+                                              );
+                                            } else {
+                                              _showCompletionVoteDialog(
+                                                assignmentId: assignmentDocId,
+                                                choreTitle: chore['title'],
+                                                choreId: chore.id,
+                                                assignedUserId: assignedUserId,
+                                              );
+                                            }
+                                          } else if (isMyChore) {
+                                            showDialog(
+                                              context: context,
+                                              builder: (ctx) => AlertDialog(
+                                                title: const Text("Mark Chore Done?"),
+                                                content: Text("Are you finished with \"${chore['title']}\"?"),
+                                                actions: [
+                                                  TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")),
+                                                  FilledButton(
+                                                    onPressed: () async {
+                                                      Navigator.pop(ctx);
+                                                      try {
+                                                        await _choreService.completeChore(
+                                                          roomId: _roomId!,
+                                                          choreId: chore.id,
+                                                          doerIds: [assignedUserId],
+                                                        );
+                                                        await _db.collection('assignments').doc(assignmentDocId).update({'isCompleted': true});
+                                                      } catch (e) {
+                                                        if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
+                                                      }
+                                                    },
+                                                    child: const Text("Mark Done"),
+                                                  ),
+                                                ],
+                                              ),
+                                            );
+                                          } else {
+                                            ScaffoldMessenger.of(context).showSnackBar(
+                                              SnackBar(content: Text("Only $assignedName can mark this done!")),
+                                            );
+                                          }
+                                        },
+                                        child: Container(
+                                          width: 100.0 * flex, // Multiply by flex for merged width
+                                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                                          decoration: BoxDecoration(
+                                            color: isDone ? Colors.green.shade300 : (isDisputed ? Colors.orange.shade100 : null),
+                                            border: Border(left: BorderSide(color: Colors.grey.shade300)),
+                                          ),
+                                          alignment: Alignment.center,
+                                          child: Text(
+                                            assignedName,
+                                            style: TextStyle(
+                                              fontSize: 13,
+                                              fontWeight: assignedName != '-' ? FontWeight.bold : FontWeight.normal,
+                                              color: assignedName != '-' ? Colors.teal.shade700 : Colors.grey,
+                                            ),
                                           ),
                                         ),
-                                      ),
-                                      onTap: assignmentDocId != null
-                                          ? () {
-                                              if (isDone) {
-                                                _showFalseReportDialog(
-                                                  assignmentId: assignmentDocId,
-                                                  choreTitle: chore['title'],
-                                                  dayOfWeek: day,
-                                                );
-                                              } else if (isDisputed) {
-                                                if (isMyChore) {
-                                                  _requestCompletionVoteDialog(
-                                                    assignmentId: assignmentDocId,
-                                                    choreTitle: chore['title'],
-                                                  );
-                                                } else {
-                                                  _showCompletionVoteDialog(
-                                                    assignmentId: assignmentDocId,
-                                                    choreTitle: chore['title'],
-                                                    choreId: chore.id,
-                                                    assignedUserId: assignedUserId!,
-                                                  );
-                                                }
-                                              } else if (isMyChore) {
-                                                showDialog(
-                                                  context: context,
-                                                  builder: (ctx) => AlertDialog(
-                                                    title: const Text("Mark Chore Done?"),
-                                                    content: Text("Are you finished with \"${chore['title']}\"?"),
-                                                    actions: [
-                                                      TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")),
-                                                      FilledButton(
-                                                        onPressed: () async {
-                                                          Navigator.pop(ctx);
-                                                          try {
-                                                            await _choreService.completeChore(
-                                                              roomId: _roomId!,
-                                                              choreId: chore.id,
-                                                              doerIds: [assignedUserId!],
-                                                            );
-                                                            await _db.collection('assignments').doc(assignmentDocId).update({'isCompleted': true});
-                                                          } catch (e) {
-                                                            if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
-                                                          }
-                                                        },
-                                                        child: const Text("Mark Done"),
-                                                      ),
-                                                    ],
-                                                  ),
-                                                );
-                                              } else {
-                                                ScaffoldMessenger.of(context).showSnackBar(
-                                                  SnackBar(content: Text("Only $assignedName can mark this done!")),
-                                                );
-                                              }
-                                            }
-                                          : null,
+                                      )
                                     );
-                                  }),
-                                ],
-                              );
-                            }).toList(),
+                                  } else {
+                                    cells.add(
+                                      Container(
+                                        width: 100, // Fixed width for empty cell
+                                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                                        decoration: BoxDecoration(
+                                          border: Border(left: BorderSide(color: Colors.grey.shade300)),
+                                        ),
+                                      )
+                                    );
+                                  }
+                                }
+
+                                return Container(
+                                  decoration: BoxDecoration(
+                                    border: Border(top: BorderSide(color: Colors.grey.shade300)),
+                                  ),
+                                  child: IntrinsicHeight(
+                                    child: Row(
+                                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                                      children: [
+                                        Container(
+                                          width: 120,
+                                          padding: const EdgeInsets.all(12),
+                                          child: Column(
+                                            mainAxisAlignment: MainAxisAlignment.center,
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              Text(chore['title'], style: const TextStyle(fontWeight: FontWeight.w600)),
+                                              Text("${chore['points']} pts", style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+                                            ],
+                                          ),
+                                        ),
+                                        ...cells,
+                                      ],
+                                    ),
+                                  ),
+                                );
+                              }).toList(),
+                            ],
                           ),
+                        ),
                       );
                     },
                   );

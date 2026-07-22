@@ -52,6 +52,7 @@ class _ManageChoresScreenState extends State<ManageChoresScreen> {
     double effortPoints = existingChore != null ? (existingChore['points'] as num).toDouble() : 1.0;
     int crewNeeded = existingChore != null ? existingChore['crew'] : 1;
     int frequencyDays = existingChore != null ? existingChore['frequencyDays'] : 7;
+    int deadlineDays = existingChore != null && existingChore.data().toString().contains('deadlineDays') ? existingChore['deadlineDays'] : 1;
     
     final List<String> availableIcons = choreIcons.keys.toList();
     String selectedIcon = existingChore != null ? (existingChore.data().toString().contains('icon') ? existingChore['icon'] : 'cleaning_services') : 'cleaning_services';
@@ -129,7 +130,22 @@ class _ManageChoresScreenState extends State<ManageChoresScreen> {
                       max: 14,
                       divisions: 13,
                       label: "$frequencyDays",
-                      onChanged: (val) => setDialogState(() => frequencyDays = val.round()),
+                      onChanged: (val) {
+                        setDialogState(() {
+                          frequencyDays = val.round();
+                          if (deadlineDays > frequencyDays) deadlineDays = frequencyDays;
+                        });
+                      },
+                    ),
+
+                    Text("Deadline Span: $deadlineDays day${deadlineDays > 1 ? 's' : ''}"),
+                    Slider(
+                      value: deadlineDays.toDouble(),
+                      min: 1,
+                      max: frequencyDays.toDouble(),
+                      divisions: (frequencyDays > 1) ? (frequencyDays - 1) : 1,
+                      label: "$deadlineDays",
+                      onChanged: (val) => setDialogState(() => deadlineDays = val.round()),
                     ),
                   ],
                 ),
@@ -150,6 +166,7 @@ class _ManageChoresScreenState extends State<ManageChoresScreen> {
                       'points': effortPoints,
                       'crew': crewNeeded,
                       'frequencyDays': frequencyDays,
+                      'deadlineDays': deadlineDays,
                     };
 
                     if (existingChore == null) {
