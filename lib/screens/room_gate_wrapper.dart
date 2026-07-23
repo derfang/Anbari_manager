@@ -52,7 +52,7 @@ class RoomGateWrapper extends StatelessWidget {
         }
 
         // Drop them straight into the Dashboard of their active room!
-        return DashboardScreen(roomId: currentRoomId);
+        return DashboardScreen(key: ValueKey(currentRoomId), roomId: currentRoomId);
       },
     );
   }

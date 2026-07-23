@@ -875,7 +875,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   DateTime currentDay = startBounds.add(Duration(days: i));
                                   final normCurrent = DateTime(currentDay.year, currentDay.month, currentDay.day);
                                   
-                                  QueryDocumentSnapshot? activeAssign;
+                                  List<QueryDocumentSnapshot> activeAssigns = [];
                                   for (var doc in assignments) {
                                     final data = doc.data() as Map<String, dynamic>;
                                     if (data['choreId'] != chore.id) continue;
@@ -886,14 +886,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                     final normAEnd = DateTime(aEnd.year, aEnd.month, aEnd.day);
 
                                     if (normCurrent.compareTo(normAStart) >= 0 && normCurrent.compareTo(normAEnd) <= 0) {
-                                      activeAssign = doc;
-                                      break;
+                                      activeAssigns.add(doc);
                                     }
                                   }
 
-                                  if (activeAssign != null) {
-                                    final data = activeAssign.data() as Map<String, dynamic>;
-                                    final aEnd = data.containsKey('endDate') ? (data['endDate'] as Timestamp).toDate() : (data['date'] as Timestamp).toDate();
+                                  if (activeAssigns.isNotEmpty) {
+                                    final firstData = activeAssigns.first.data() as Map<String, dynamic>;
+                                    final aEnd = firstData.containsKey('endDate') ? (firstData['endDate'] as Timestamp).toDate() : (firstData['date'] as Timestamp).toDate();
                                     final normAEnd = DateTime(aEnd.year, aEnd.month, aEnd.day);
                                     
                                     int daysRemainingInWeek = 7 - i;
@@ -902,87 +901,101 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                     
                                     skipDays = flex - 1;
 
-                                    final String assignedName = data['assignedToName'] ?? '-';
-                                    final bool isDone = data['isCompleted'] == true;
-                                    final bool isDisputed = data['disputed'] == true;
-                                    final String assignmentDocId = activeAssign.id;
-                                    final String assignedUserId = data['assignedToUserId'];
-                                    final bool isMyChore = assignedUserId == _auth.currentUser?.uid;
-
                                     const List<String> weekDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
                                     cells.add(
-                                      InkWell(
-                                        onTap: () {
-                                          if (isDone) {
-                                            _showFalseReportDialog(
-                                              assignmentId: assignmentDocId,
-                                              choreTitle: chore['title'],
-                                              dayOfWeek: weekDays[currentDay.weekday - 1],
-                                            );
-                                          } else if (isDisputed) {
-                                            if (isMyChore) {
-                                              _requestCompletionVoteDialog(
-                                                assignmentId: assignmentDocId,
-                                                choreTitle: chore['title'],
-                                              );
-                                            } else {
-                                              _showCompletionVoteDialog(
-                                                assignmentId: assignmentDocId,
-                                                choreTitle: chore['title'],
-                                                choreId: chore.id,
-                                                assignedUserId: assignedUserId,
-                                              );
-                                            }
-                                          } else if (isMyChore) {
-                                            showDialog(
-                                              context: context,
-                                              builder: (ctx) => AlertDialog(
-                                                title: const Text("Mark Chore Done?"),
-                                                content: Text("Are you finished with \"${chore['title']}\"?"),
-                                                actions: [
-                                                  TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")),
-                                                  FilledButton(
-                                                    onPressed: () async {
-                                                      Navigator.pop(ctx);
-                                                      try {
-                                                        await _choreService.completeChore(
-                                                          roomId: _roomId!,
-                                                          choreId: chore.id,
-                                                          doerIds: [assignedUserId],
-                                                        );
-                                                        await _db.collection('assignments').doc(assignmentDocId).update({'isCompleted': true});
-                                                      } catch (e) {
-                                                        if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
-                                                      }
-                                                    },
-                                                    child: const Text("Mark Done"),
+                                      Container(
+                                        width: 100.0 * flex, // Multiply by flex for merged width
+                                        decoration: BoxDecoration(
+                                          border: Border(left: BorderSide(color: Colors.grey.shade300)),
+                                        ),
+                                        child: Column(
+                                          mainAxisAlignment: MainAxisAlignment.center,
+                                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                                          children: activeAssigns.map((activeAssign) {
+                                            final data = activeAssign.data() as Map<String, dynamic>;
+                                            final String assignedName = data['assignedToName'] ?? '-';
+                                            final bool isDone = data['isCompleted'] == true;
+                                            final bool isDisputed = data['disputed'] == true;
+                                            final String assignmentDocId = activeAssign.id;
+                                            final String assignedUserId = data['assignedToUserId'];
+                                            final bool isMyChore = assignedUserId == _auth.currentUser?.uid;
+
+                                            return Expanded(
+                                              child: InkWell(
+                                              onTap: () {
+                                                if (isDone) {
+                                                  _showFalseReportDialog(
+                                                    assignmentId: assignmentDocId,
+                                                    choreTitle: chore['title'],
+                                                    dayOfWeek: weekDays[currentDay.weekday - 1],
+                                                  );
+                                                } else if (isDisputed) {
+                                                  if (isMyChore) {
+                                                    _requestCompletionVoteDialog(
+                                                      assignmentId: assignmentDocId,
+                                                      choreTitle: chore['title'],
+                                                    );
+                                                  } else {
+                                                    _showCompletionVoteDialog(
+                                                      assignmentId: assignmentDocId,
+                                                      choreTitle: chore['title'],
+                                                      choreId: chore.id,
+                                                      assignedUserId: assignedUserId,
+                                                    );
+                                                  }
+                                                } else if (isMyChore) {
+                                                  showDialog(
+                                                    context: context,
+                                                    builder: (ctx) => AlertDialog(
+                                                      title: const Text("Mark Chore Done?"),
+                                                      content: Text("Are you finished with \"${chore['title']}\"?"),
+                                                      actions: [
+                                                        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")),
+                                                        FilledButton(
+                                                          onPressed: () async {
+                                                            Navigator.pop(ctx);
+                                                            try {
+                                                              await _choreService.completeChore(
+                                                                roomId: _roomId!,
+                                                                choreId: chore.id,
+                                                                doerIds: [assignedUserId],
+                                                              );
+                                                              await _db.collection('assignments').doc(assignmentDocId).update({'isCompleted': true});
+                                                            } catch (e) {
+                                                              if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: `$e`")));
+                                                            }
+                                                          },
+                                                          child: const Text("Mark Done"),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  );
+                                                } else {
+                                                  ScaffoldMessenger.of(context).showSnackBar(
+                                                    SnackBar(content: Text("Only $assignedName can mark this done!")),
+                                                  );
+                                                }
+                                              },
+                                              child: Container(
+                                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                                                decoration: BoxDecoration(
+                                                  color: isDone ? Colors.green.shade300 : (isDisputed ? Colors.orange.shade100 : null),
+                                                  border: activeAssigns.last.id == activeAssign.id ? null : Border(bottom: BorderSide(color: Colors.grey.shade300)),
+                                                ),
+                                                alignment: Alignment.center,
+                                                child: Text(
+                                                  assignedName,
+                                                  style: TextStyle(
+                                                    fontSize: 13,
+                                                    fontWeight: assignedName != '-' ? FontWeight.bold : FontWeight.normal,
+                                                    color: assignedName != '-' ? Colors.teal.shade700 : Colors.grey,
                                                   ),
-                                                ],
+                                                ),
                                               ),
-                                            );
-                                          } else {
-                                            ScaffoldMessenger.of(context).showSnackBar(
-                                              SnackBar(content: Text("Only $assignedName can mark this done!")),
-                                            );
-                                          }
-                                        },
-                                        child: Container(
-                                          width: 100.0 * flex, // Multiply by flex for merged width
-                                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                                          decoration: BoxDecoration(
-                                            color: isDone ? Colors.green.shade300 : (isDisputed ? Colors.orange.shade100 : null),
-                                            border: Border(left: BorderSide(color: Colors.grey.shade300)),
-                                          ),
-                                          alignment: Alignment.center,
-                                          child: Text(
-                                            assignedName,
-                                            style: TextStyle(
-                                              fontSize: 13,
-                                              fontWeight: assignedName != '-' ? FontWeight.bold : FontWeight.normal,
-                                              color: assignedName != '-' ? Colors.teal.shade700 : Colors.grey,
                                             ),
-                                          ),
+                                          );
+                                          }).toList(),
                                         ),
                                       )
                                     );
@@ -1052,8 +1065,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   users.sort((a, b) {
                     final dataA = a.data() as Map<String, dynamic>;
                     final dataB = b.data() as Map<String, dynamic>;
-                    final ptsA = (dataA['points'] ?? 0.0).toDouble();
-                    final ptsB = (dataB['points'] ?? 0.0).toDouble();
+                    final ptsA = ((dataA['roomPoints'] as Map?)?[_roomId] ?? 0.0).toDouble();
+                    final ptsB = ((dataB['roomPoints'] as Map?)?[_roomId] ?? 0.0).toDouble();
                     return ptsB.compareTo(ptsA);
                   });
 
@@ -1070,7 +1083,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       separatorBuilder: (context, index) => const Divider(height: 1),
                       itemBuilder: (context, index) {
                         final userData = users[index].data() as Map<String, dynamic>;
-                        final points = (userData['points'] ?? 0.0).toDouble();
+                        final points = ((userData['roomPoints'] as Map?)?[_roomId] ?? 0.0).toDouble();
                         return ListTile(
                           leading: CircleAvatar(
                             backgroundColor: index == 0 ? Colors.amber : Colors.teal.shade100,

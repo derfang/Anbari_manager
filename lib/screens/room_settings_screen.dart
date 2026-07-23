@@ -202,7 +202,7 @@ class _RoomSettingsScreenState extends State<RoomSettingsScreen> {
                           ),
                           subtitle: Row(
                             children: [
-                              Text("${data['points']?.toStringAsFixed(1) ?? '0.0'} pts"),
+                              Text("${((data['roomPoints'] as Map?)?[_roomId] ?? 0.0).toStringAsFixed(1)} pts"),
                               if (data['isAbsent'] == true) ...[
                                 const SizedBox(width: 8),
                                 const Text("•", style: TextStyle(color: Colors.grey)),
@@ -324,7 +324,7 @@ class _RoomSettingsScreenState extends State<RoomSettingsScreen> {
           .where(Filter.or(Filter('roomId', isEqualTo: _roomId), Filter('roomIds', arrayContains: _roomId)))
           .get();
       for (var doc in usersSnapshot.docs) {
-        batch.update(doc.reference, {'points': 0.0});
+        batch.update(doc.reference, {'roomPoints.$_roomId': 0.0});
       }
 
       // 2. Wipe all assignments

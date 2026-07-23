@@ -71,7 +71,9 @@ class _AuthScreenState extends State<AuthScreen> {
         }
       } else {
         try {
-          await GoogleSignIn.instance.initialize();
+          await GoogleSignIn.instance.initialize(
+            serverClientId: '741106847119-vf1872ndb7a9lmhbf6fh1ddmphefjmuu.apps.googleusercontent.com',
+          );
         } catch (e) {}
         
         final GoogleSignInAccount? googleUser = await GoogleSignIn.instance.authenticate();

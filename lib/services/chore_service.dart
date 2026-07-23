@@ -159,14 +159,14 @@ class ChoreService {
       // Reward the doers (Increments their points by the chore value)
       for (var doer in doers) {
         batch.update(doer.reference, {
-          'points': FieldValue.increment(effortValue),
+          'roomPoints.$roomId': FieldValue.increment(effortValue),
         });
       }
 
       // Tax the slackers (Decrements their points by the tax value)
       for (var slacker in presentSlackers) {
         batch.update(slacker.reference, {
-          'points': FieldValue.increment(-slackerTax),
+          'roomPoints.$roomId': FieldValue.increment(-slackerTax),
         });
       }
 
@@ -237,14 +237,14 @@ class ChoreService {
       // Un-reward the doers
       for (var doer in doers) {
         batch.update(doer.reference, {
-          'points': FieldValue.increment(-effortValue),
+          'roomPoints.$roomId': FieldValue.increment(-effortValue),
         });
       }
 
       // Un-tax the slackers
       for (var slacker in presentSlackers) {
         batch.update(slacker.reference, {
-          'points': FieldValue.increment(slackerTax),
+          'roomPoints.$roomId': FieldValue.increment(slackerTax),
         });
       }
 
@@ -363,8 +363,8 @@ class ChoreService {
 
           // Sort by points ascending
           availableUsers.sort((a, b) {
-            double pA = (a['points'] ?? 0).toDouble();
-            double pB = (b['points'] ?? 0).toDouble();
+            double pA = ((a['roomPoints'] as Map?)?[roomId] ?? 0).toDouble();
+            double pB = ((b['roomPoints'] as Map?)?[roomId] ?? 0).toDouble();
             return pA.compareTo(pB);
           });
 
@@ -394,7 +394,8 @@ class ChoreService {
 
             // Simulate point increase
             double chorePoints = (chore['points'] ?? 1).toDouble();
-            assignedUser['points'] = (assignedUser['points'] ?? 0).toDouble() + chorePoints;
+            assignedUser['roomPoints'] ??= {};
+            assignedUser['roomPoints'][roomId] = ((assignedUser['roomPoints'] as Map?)?[roomId] ?? 0).toDouble() + chorePoints;
 
             assignmentsPerUser[assignedUser['id']] = (assignmentsPerUser[assignedUser['id']] ?? 0) + 1;
           }
@@ -442,15 +443,29 @@ class ChoreService {
     required DateTime endDate,
   }) async {
     try {
-      // 1. Remove user from room (clear their roomId or delete doc. Let's just update roomId to empty)
+      // 1. Remove user from room (clear their legacy roomId and arrayRemove from roomIds)
       await _db.collection('users').doc(userId).update({
         'roomId': '',
+        'roomIds': FieldValue.arrayRemove([roomId]),
       });
 
-      // 2. Re-generate schedule
+      // 2. Delete all their pending assignments for this room
+      final batch = _db.batch();
+      final pendingAssignments = await _db.collection('assignments')
+          .where('roomId', isEqualTo: roomId)
+          .where('assignedTo', isEqualTo: userId)
+          .where('status', isEqualTo: 'pending')
+          .get();
+          
+      for (var doc in pendingAssignments.docs) {
+        batch.delete(doc.reference);
+      }
+      await batch.commit();
+
+      // 3. Re-generate schedule for remaining roommates
       await recalculateSchedule(roomId);
 
-      debugPrint("User removed and schedule recalculated!");
+      debugPrint("User removed, pending assignments deleted, and schedule recalculated!");
     } catch (e) {
       debugPrint("Error removing user: $e");
       rethrow;

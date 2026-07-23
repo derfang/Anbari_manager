@@ -81,6 +81,8 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
         'currentRoomId': roomId,
         'roomIds': FieldValue.arrayUnion([roomId]),
         'roles': {roomId: 'admin'}, // map role per room
+        'roomPoints.$roomId': FieldValue.increment(0.0), // Initialize specific room points
+        'points': FieldValue.increment(0.0), // legacy fallback
         'joinedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
 

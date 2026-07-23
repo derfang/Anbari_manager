@@ -50,7 +50,8 @@ class _JoinRoomScreenState extends State<JoinRoomScreen> {
         'currentRoomId': roomId,
         'roomIds': FieldValue.arrayUnion([roomId]),
         'roles': {roomId: 'user'}, // map role per room
-        'points': FieldValue.increment(0.0), // Safely initialize points
+        'roomPoints.$roomId': FieldValue.increment(0.0), // Initialize specific room points
+        'points': FieldValue.increment(0.0), // legacy fallback
         'isAdmin': false,
         'isAbsent': false,
       }, SetOptions(merge: true));
