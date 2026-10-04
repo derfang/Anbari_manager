@@ -82,7 +82,7 @@ jobs:
           name: windows-release
           path: |
             RoommateChores-Windows-Portable.zip
-            build/windows/x64/runner/Release/*.msix
+            **/*.msix
 
   create-release:
     name: Create GitHub Release
@@ -110,9 +110,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            ./release-files/*-release.apk
-            ./release-files/RoommateChores-Windows-Portable.zip
-            ./release-files/*.msix
+            ./release-files/**/*-release.apk
+            ./release-files/**/RoommateChores-Windows-Portable.zip
+            ./release-files/**/*.msix
           name: Release ${{ github.ref_name }}
           draft: false
           prerelease: false
