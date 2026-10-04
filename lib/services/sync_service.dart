@@ -70,16 +70,23 @@ class SyncService extends ChangeNotifier {
     }
   }
 
-  /// Lightweight 2-second socket probe to Firestore endpoint.
-  /// Detects immediately if Firebase is blocked without a VPN.
+  /// Secure HTTP probe to Firestore endpoint.
+  /// A raw TCP socket can be fooled by firewalls intercepting traffic.
+  /// Doing a full HTTPS HEAD request forces the SSL/TLS handshake (SNI), 
+  /// which accurately detects if the government/ISP is blocking Firebase.
   Future<bool> _probeFirebase() async {
     try {
-      final socket = await Socket.connect(
-        'firestore.googleapis.com',
-        443,
-        timeout: const Duration(seconds: 2),
-      );
-      socket.destroy();
+      final client = HttpClient();
+      client.connectionTimeout = const Duration(seconds: 3);
+      
+      final request = await client
+          .headUrl(Uri.parse('https://firestore.googleapis.com/'))
+          .timeout(const Duration(seconds: 3));
+          
+      await request.close().timeout(const Duration(seconds: 3));
+      client.close();
+      
+      // If we get any HTTP response (even a 404), the server is reachable.
       return true;
     } catch (_) {
       return false;
