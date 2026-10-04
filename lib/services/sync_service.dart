@@ -83,12 +83,18 @@ class SyncService extends ChangeNotifier {
           .headUrl(Uri.parse('https://firestore.googleapis.com/'))
           .timeout(const Duration(seconds: 3));
           
-      await request.close().timeout(const Duration(seconds: 3));
+      final response = await request.close().timeout(const Duration(seconds: 3));
       client.close();
       
-      // If we get any HTTP response (even a 404), the server is reachable.
+      // A standard HEAD request to the base URL returns 404 Not Found.
+      // If Google geo-blocks the IP (e.g. Iranian IPs), it returns 403 Forbidden.
+      if (response.statusCode == 403) {
+        return false; // Firebase is actively rejecting the connection
+      }
+      
       return true;
     } catch (_) {
+      // Blocked by local firewall (Timeout, HandshakeException, SocketException)
       return false;
     }
   }
