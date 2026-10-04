@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -9,39 +10,85 @@ class SyncService extends ChangeNotifier {
 
   bool _isOffline = false;
   bool _isSyncing = false;
+  bool _isProbing = false;
 
   bool get isOffline => _isOffline;
   bool get isSyncing => _isSyncing;
 
   StreamSubscription? _connectivitySubscription;
+  Timer? _heartbeatTimer;
 
   SyncService._internal() {
     _initConnectivity();
   }
 
   Future<void> _initConnectivity() async {
-    // Initial check
+    // Initial hardware check
     final results = await Connectivity().checkConnectivity();
-    _updateConnectionStatus(results);
+    await _handleConnectivityChange(results);
 
-    // Listen for changes
-    _connectivitySubscription = Connectivity().onConnectivityChanged.listen(_updateConnectionStatus);
+    // Listen for interface changes (WiFi, Mobile data, or VPN toggle)
+    _connectivitySubscription = Connectivity().onConnectivityChanged.listen(_handleConnectivityChange);
+
+    // Heartbeat every 4 seconds to verify actual Firebase server reachability
+    _startHeartbeat();
   }
 
-  void _updateConnectionStatus(List<ConnectivityResult> results) {
-    bool isDisconnected = results.contains(ConnectivityResult.none) && results.length == 1;
-    // If there's an active connection (e.g., wifi, mobile), isDisconnected is false
-    if (!results.contains(ConnectivityResult.wifi) && 
-        !results.contains(ConnectivityResult.mobile) && 
-        !results.contains(ConnectivityResult.ethernet) &&
-        !results.contains(ConnectivityResult.vpn)) {
-      isDisconnected = true;
-    } else {
-      isDisconnected = false;
+  void _startHeartbeat() {
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = Timer.periodic(const Duration(seconds: 4), (_) async {
+      await _verifyReachability();
+    });
+  }
+
+  Future<void> _handleConnectivityChange(List<ConnectivityResult> results) async {
+    final hasInterface = results.any((r) =>
+        r == ConnectivityResult.wifi ||
+        r == ConnectivityResult.mobile ||
+        r == ConnectivityResult.ethernet ||
+        r == ConnectivityResult.vpn);
+
+    if (!hasInterface) {
+      // No network interface enabled at all
+      _setOffline(true);
+      return;
     }
 
-    if (_isOffline != isDisconnected) {
-      _isOffline = isDisconnected;
+    // Network interface is present, probe Firebase directly to ensure it isn't blocked
+    await _verifyReachability();
+  }
+
+  Future<void> _verifyReachability() async {
+    if (_isProbing) return;
+    _isProbing = true;
+
+    try {
+      final reachable = await _probeFirebase();
+      _setOffline(!reachable);
+    } finally {
+      _isProbing = false;
+    }
+  }
+
+  /// Lightweight 2-second socket probe to Firestore endpoint.
+  /// Detects immediately if Firebase is blocked without a VPN.
+  Future<bool> _probeFirebase() async {
+    try {
+      final socket = await Socket.connect(
+        'firestore.googleapis.com',
+        443,
+        timeout: const Duration(seconds: 2),
+      );
+      socket.destroy();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  void _setOffline(bool offline) {
+    if (_isOffline != offline) {
+      _isOffline = offline;
       notifyListeners();
     }
   }
@@ -49,6 +96,7 @@ class SyncService extends ChangeNotifier {
   @override
   void dispose() {
     _connectivitySubscription?.cancel();
+    _heartbeatTimer?.cancel();
     super.dispose();
   }
 
@@ -62,8 +110,8 @@ class SyncService extends ChangeNotifier {
     try {
       await action().timeout(const Duration(seconds: 3));
     } on TimeoutException {
-      // The action took too long (likely offline).
-      // We notify the user that it's queued.
+      // The action took too long (likely offline or Firebase blocked).
+      _setOffline(true);
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -84,7 +132,7 @@ class SyncService extends ChangeNotifier {
       _isSyncing = true;
       notifyListeners();
     }
-    
+
     // Firebase automatically tracks all queued writes.
     // This future resolves only when ALL pending offline writes are successfully synced to the server.
     FirebaseFirestore.instance.waitForPendingWrites().then((_) {
