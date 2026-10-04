@@ -7,7 +7,7 @@ on:
 
 jobs:
   build-android:
-    name: Build Android APK
+    name: Build Android APKs
     runs-on: ubuntu-latest
 
     steps:
@@ -40,14 +40,14 @@ jobs:
           storeFile=upload-keystore.jks
           EOF
 
-      - name: Build Release APK
-        run: flutter build apk --release
+      - name: Build Split APKs
+        run: flutter build apk --release --split-per-abi
 
-      - name: Upload Android Artifact
+      - name: Upload Android Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: android-release
-          path: build/app/outputs/flutter-apk/app-release.apk
+          path: build/app/outputs/flutter-apk/*-release.apk
 
   build-windows:
     name: Build Windows App
@@ -70,14 +70,19 @@ jobs:
       - name: Build Windows Release
         run: flutter build windows --release
 
-      - name: Zip Windows Release
-        run: Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath RoommateChores-Windows.zip
+      - name: Zip Windows Portable
+        run: Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath RoommateChores-Windows-Portable.zip
 
-      - name: Upload Windows Artifact
+      - name: Create MSIX Installer
+        run: dart run msix:create
+
+      - name: Upload Windows Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: windows-release
-          path: RoommateChores-Windows.zip
+          path: |
+            RoommateChores-Windows-Portable.zip
+            build/windows/x64/runner/Release/*.msix
 
   create-release:
     name: Create GitHub Release
@@ -105,8 +110,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            ./release-files/app-release.apk
-            ./release-files/RoommateChores-Windows.zip
+            ./release-files/*-release.apk
+            ./release-files/RoommateChores-Windows-Portable.zip
+            ./release-files/*.msix
           name: Release ${{ github.ref_name }}
           draft: false
           prerelease: false
