@@ -1,20 +1,56 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 
 class SyncService extends ChangeNotifier {
   static final SyncService _instance = SyncService._internal();
   factory SyncService() => _instance;
 
-  // We had to remove connectivity_plus due to pub.dev being blocked on this network,
-  // so we will always assume online by default. The timeout logic still works!
   bool _isOffline = false;
   bool _isSyncing = false;
 
   bool get isOffline => _isOffline;
   bool get isSyncing => _isSyncing;
 
-  SyncService._internal();
+  StreamSubscription? _connectivitySubscription;
+
+  SyncService._internal() {
+    _initConnectivity();
+  }
+
+  Future<void> _initConnectivity() async {
+    // Initial check
+    final results = await Connectivity().checkConnectivity();
+    _updateConnectionStatus(results);
+
+    // Listen for changes
+    _connectivitySubscription = Connectivity().onConnectivityChanged.listen(_updateConnectionStatus);
+  }
+
+  void _updateConnectionStatus(List<ConnectivityResult> results) {
+    bool isDisconnected = results.contains(ConnectivityResult.none) && results.length == 1;
+    // If there's an active connection (e.g., wifi, mobile), isDisconnected is false
+    if (!results.contains(ConnectivityResult.wifi) && 
+        !results.contains(ConnectivityResult.mobile) && 
+        !results.contains(ConnectivityResult.ethernet) &&
+        !results.contains(ConnectivityResult.vpn)) {
+      isDisconnected = true;
+    } else {
+      isDisconnected = false;
+    }
+
+    if (_isOffline != isDisconnected) {
+      _isOffline = isDisconnected;
+      notifyListeners();
+    }
+  }
+
+  @override
+  void dispose() {
+    _connectivitySubscription?.cancel();
+    super.dispose();
+  }
 
   /// Wraps a database write with a 3-second timeout.
   /// If it times out, it unblocks the UI, marks the app as "Syncing", 
