@@ -5,6 +5,7 @@ import 'fcm_service.dart';
 
 class ChoreService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
+  final Set<String> _processingAssignments = {};
 
   List<DateTime> getWeekBounds(int weekOffset) {
     DateTime now = DateTime.now();
@@ -108,9 +109,20 @@ class ChoreService {
   Future<void> completeChore({
     required String roomId,
     required String choreId,
+    required String assignmentId,
     required List<String> doerIds, // Supports multi-guy chores
   }) async {
+    if (_processingAssignments.contains(assignmentId)) {
+      debugPrint("Already processing this assignment. Aborting.");
+      return;
+    }
+    _processingAssignments.add(assignmentId);
     try {
+      final assignmentDoc = await _db.collection('assignments').doc(assignmentId).get();
+      if (assignmentDoc.exists && assignmentDoc.data()?['isCompleted'] == true) {
+        debugPrint("Chore already completed. Aborting.");
+        return;
+      }
       // 1. Fetch the chore details to get its effortValue
       final choreDoc = await _db.collection('chores').doc(choreId).get();
       if (!choreDoc.exists) throw Exception("Chore not found");
@@ -121,7 +133,7 @@ class ChoreService {
       // 2. Fetch all users in the room
       final usersSnapshot = await _db
           .collection('users')
-          .where('roomId', isEqualTo: roomId)
+          .where(Filter.or(Filter('roomId', isEqualTo: roomId), Filter('roomIds', arrayContains: roomId)))
           .get();
 
       List<DocumentSnapshot> presentSlackers = [];
@@ -180,6 +192,8 @@ class ChoreService {
         'effortValue': effortValue,
       });
 
+      batch.update(_db.collection('assignments').doc(assignmentId), {'isCompleted': true, 'v': 2});
+
       // 7. Execute the batch
       await batch.commit();
       debugPrint(
@@ -191,15 +205,28 @@ class ChoreService {
     } catch (e) {
       debugPrint("Error processing chore math: $e"); // FIXED: Using debugPrint
       rethrow;
+    } finally {
+      _processingAssignments.remove(assignmentId);
     }
   }
 
   Future<void> undoChore({
     required String roomId,
     required String choreId,
+    required String assignmentId,
     required List<String> doerIds,
   }) async {
+    if (_processingAssignments.contains(assignmentId)) {
+      debugPrint("Already processing this assignment. Aborting.");
+      return;
+    }
+    _processingAssignments.add(assignmentId);
     try {
+      final assignmentDoc = await _db.collection('assignments').doc(assignmentId).get();
+      if (assignmentDoc.exists && assignmentDoc.data()?['isCompleted'] == false) {
+        debugPrint("Chore already undone. Aborting.");
+        return;
+      }
       final choreDoc = await _db.collection('chores').doc(choreId).get();
       if (!choreDoc.exists) throw Exception("Chore not found");
 
@@ -207,7 +234,7 @@ class ChoreService {
 
       final usersSnapshot = await _db
           .collection('users')
-          .where('roomId', isEqualTo: roomId)
+          .where(Filter.or(Filter('roomId', isEqualTo: roomId), Filter('roomIds', arrayContains: roomId)))
           .get();
 
       List<DocumentSnapshot> presentSlackers = [];
@@ -248,6 +275,8 @@ class ChoreService {
         });
       }
 
+      batch.update(_db.collection('assignments').doc(assignmentId), {'isCompleted': false, 'v': 2});
+
       await batch.commit();
       debugPrint("Zero-sum points successfully reverted!");
 
@@ -256,6 +285,8 @@ class ChoreService {
     } catch (e) {
       debugPrint("Error reverting chore math: $e");
       rethrow;
+    } finally {
+      _processingAssignments.remove(assignmentId);
     }
   }
 
@@ -270,7 +301,7 @@ class ChoreService {
       // 1. Fetch users
       final usersSnapshot = await _db
           .collection('users')
-          .where('roomIds', arrayContains: roomId)
+          .where(Filter.or(Filter('roomId', isEqualTo: roomId), Filter('roomIds', arrayContains: roomId)))
           .get();
       List<Map<String, dynamic>> users = usersSnapshot.docs.map((doc) {
         var data = doc.data();
@@ -313,9 +344,13 @@ class ChoreService {
 
       final batch = _db.batch();
       final int daysDiff = endDate.difference(startDate).inDays;
+      final DateTime epoch = DateTime.utc(2024, 1, 6);
 
       for (int i = 0; i <= daysDiff; i++) {
         DateTime currentDay = startDate.add(Duration(days: i));
+        DateTime currentDayUtc = DateTime.utc(currentDay.year, currentDay.month, currentDay.day);
+        int daysSinceEpoch = currentDayUtc.difference(epoch).inDays;
+        
         String dayString = "${currentDay.year}-${currentDay.month.toString().padLeft(2, '0')}-${currentDay.day.toString().padLeft(2, '0')}";
         
         const List<String> weekDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
@@ -331,7 +366,7 @@ class ChoreService {
 
         for (var chore in dailyChores) {
           int freq = chore['frequencyDays'] ?? 7;
-          if (i % freq != 0) continue;
+          if (daysSinceEpoch % freq != 0) continue;
 
           // Skip if an assignment already exists for this chore on this day
           if (existingChoreDays.contains("${chore['id']}_$dayString")) {
@@ -375,7 +410,8 @@ class ChoreService {
             int deadlineDays = chore['deadlineDays'] ?? 1;
             DateTime endDay = currentDay.add(Duration(days: deadlineDays - 1));
 
-            final assignmentRef = _db.collection('assignments').doc();
+            final String deterministicId = "${roomId}_${chore['id']}_${dayString}_${assignedUser['id']}";
+            final assignmentRef = _db.collection('assignments').doc(deterministicId);
             batch.set(assignmentRef, {
               'roomId': roomId,
               'choreId': chore['id'], 
@@ -390,6 +426,7 @@ class ChoreService {
               'deadlineDays': deadlineDays,
               'isCompleted': false,
               'createdAt': FieldValue.serverTimestamp(),
+              'v': 2,
             });
 
             // Simulate point increase

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../services/chore_service.dart';
+import '../services/sync_service.dart';
 import '../utils/chore_icons.dart';
 
 class ManageChoresScreen extends StatefulWidget {
@@ -60,6 +61,7 @@ class _ManageChoresScreenState extends State<ManageChoresScreen> {
     showDialog(
       context: context,
       builder: (context) {
+        bool isSubmitting = false;
         // StatefulBuilder allows the dialog sliders/dropdowns to update live
         return StatefulBuilder(
           builder: (context, setDialogState) {
@@ -156,32 +158,42 @@ class _ManageChoresScreenState extends State<ManageChoresScreen> {
                   child: const Text("Cancel"),
                 ),
                 FilledButton(
-                  onPressed: () async {
+                  onPressed: isSubmitting ? null : () async {
                     if (titleController.text.trim().isEmpty) return;
+                    setDialogState(() => isSubmitting = true);
                     
-                    final choreData = {
-                      'roomId': _roomId,
-                      'title': titleController.text.trim(),
-                      'icon': selectedIcon,
-                      'points': effortPoints,
-                      'crew': crewNeeded,
-                      'frequencyDays': frequencyDays,
-                      'deadlineDays': deadlineDays,
-                    };
+                    try {
+                      await SyncService().runWithTimeout(
+                        context: context,
+                        action: () async {
+                          final choreData = {
+                            'roomId': _roomId,
+                            'title': titleController.text.trim(),
+                            'icon': selectedIcon,
+                            'points': effortPoints,
+                            'crew': crewNeeded,
+                            'frequencyDays': frequencyDays,
+                            'deadlineDays': deadlineDays,
+                          };
 
-                    if (existingChore == null) {
-                      await _db.collection('chores').add(choreData);
-                    } else {
-                      // Update existing
-                      await _db.collection('chores').doc(existingChore.id).update(choreData);
+                          if (existingChore == null) {
+                            await _db.collection('chores').add(choreData);
+                          } else {
+                            await _db.collection('chores').doc(existingChore.id).update(choreData);
+                          }
+                          
+                          await ChoreService().recalculateSchedule(_roomId!);
+                        }
+                      );
+                      if (context.mounted) Navigator.pop(context);
+                    } catch (e) {
+                      setDialogState(() => isSubmitting = false);
+                      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
                     }
-                    
-                    // Auto-recalculate the schedule
-                    await ChoreService().recalculateSchedule(_roomId!);
-
-                    if (context.mounted) Navigator.pop(context);
                   },
-                  child: const Text("Save"),
+                  child: isSubmitting 
+                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                    : const Text("Save"),
                 )
               ],
             );

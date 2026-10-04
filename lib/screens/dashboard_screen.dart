@@ -7,6 +7,7 @@ import 'auth_screen.dart';
 import 'absence_screen.dart';
 import 'room_settings_screen.dart';
 import '../services/chore_service.dart';
+import '../services/sync_service.dart';
 import 'room_selection_screen.dart';
 import '../utils/chore_icons.dart';
 import '../services/finance_service.dart';
@@ -110,6 +111,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       await _choreService.undoChore(
         roomId: roomId, 
         choreId: choreId, 
+        assignmentId: assignmentId,
         doerIds: [assignedToUserId],
       );
 
@@ -142,7 +144,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           .where('type', isEqualTo: 'completion_request')
           .where('status', isEqualTo: 'resolved')
           .limit(1).get(),
-      _db.collection('users').where('roomId', isEqualTo: _roomId).get(),
+      _db.collection('users').where(Filter.or(Filter('roomId', isEqualTo: _roomId), Filter('roomIds', arrayContains: _roomId))).get(),
     ]);
 
     final reportQuery = results[0] as QuerySnapshot;
@@ -330,7 +332,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           .where('type', isEqualTo: 'completion_request')
           .where('status', isEqualTo: 'pending')
           .limit(1).get(),
-      _db.collection('users').where('roomId', isEqualTo: _roomId).get(),
+      _db.collection('users').where(Filter.or(Filter('roomId', isEqualTo: _roomId), Filter('roomIds', arrayContains: _roomId))).get(),
     ]);
 
     final reportQuery = results[0] as QuerySnapshot;
@@ -380,6 +382,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   await _choreService.completeChore(
                     roomId: _roomId!,
                     choreId: choreId,
+                    assignmentId: assignmentId,
                     doerIds: [assignedUserId],
                   );
                   await _db.collection('assignments').doc(assignmentId).update({'isCompleted': true, 'disputed': false});
@@ -556,7 +559,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             final newApprovals = [...approvals, currentUid!];
                             await doc.reference.update({'approvals': newApprovals});
 
-                            final usersSnap = await _db.collection('users').where('roomId', isEqualTo: _roomId).get();
+                            final usersSnap = await _db.collection('users').where(Filter.or(Filter('roomId', isEqualTo: _roomId), Filter('roomIds', arrayContains: _roomId))).get();
                             final threshold = (usersSnap.docs.length * 2 / 3).ceil();
                             if (newApprovals.length >= threshold) {
                               if (isCompletionReq) {
@@ -566,6 +569,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   await _choreService.completeChore(
                                     roomId: _roomId!,
                                     choreId: assignData['choreId'],
+                                    assignmentId: data['assignmentId'],
                                     doerIds: [assignData['assignedToUserId']],
                                   );
                                   await assignmentDoc.reference.update({'isCompleted': true, 'disputed': false});
@@ -698,6 +702,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   await _choreService.completeChore(
                                     roomId: _roomId!,
                                     choreId: data['choreId'],
+                                    assignmentId: doc.id,
                                     doerIds: [data['assignedToUserId']],
                                   );
                                   await doc.reference.update({'isCompleted': true});
@@ -959,6 +964,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                                               await _choreService.completeChore(
                                                                 roomId: _roomId!,
                                                                 choreId: chore.id,
+                                                                assignmentId: assignmentDocId,
                                                                 doerIds: [assignedUserId],
                                                               );
                                                               await _db.collection('assignments').doc(assignmentDocId).update({'isCompleted': true});

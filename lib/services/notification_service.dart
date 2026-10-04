@@ -1,4 +1,5 @@
 
+import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -11,6 +12,11 @@ import 'package:flutter_timezone/flutter_timezone.dart';
 
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  try {
+    await Firebase.initializeApp();
+  } catch (e) {
+    // Ignore if already initialized
+  }
   final FlutterLocalNotificationsPlugin localNotifs = FlutterLocalNotificationsPlugin();
   
   const AndroidInitializationSettings androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
@@ -19,10 +25,11 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await localNotifs.initialize(settings: initSettings);
 
   const AndroidNotificationChannel channel = AndroidNotificationChannel(
-    'roommate_chores_channel',
+    'roommate_chores_channel_v3',
     'Roommate Chores Notifications',
     description: 'Notifications for chores and expenses',
     importance: Importance.max,
+    playSound: true,
     sound: RawResourceAndroidNotificationSound('new_notification'),
   );
   
@@ -70,12 +77,13 @@ Future<void> _showLocalNotification(RemoteMessage message, FlutterLocalNotificat
     }
 
     final androidPlatformChannelSpecifics = AndroidNotificationDetails(
-      'roommate_chores_channel', 
+      'roommate_chores_channel_v3', 
       'Roommate Chores Notifications',
       channelDescription: 'Notifications for chores and expenses',
       importance: Importance.max,
       priority: Priority.high,
       category: AndroidNotificationCategory.message,
+      playSound: true,
       sound: const RawResourceAndroidNotificationSound('new_notification'),
       styleInformation: styleInfo,
       largeIcon: imageName != null && imageName.isNotEmpty 
@@ -126,10 +134,11 @@ class NotificationService {
 
     // Explicitly create the channel so background FCM messages can use it!
     const AndroidNotificationChannel channel = AndroidNotificationChannel(
-      'roommate_chores_channel',
+      'roommate_chores_channel_v3',
       'Roommate Chores Notifications',
       description: 'Notifications for chores and expenses',
       importance: Importance.max,
+      playSound: true,
       sound: RawResourceAndroidNotificationSound('new_notification'),
     );
     

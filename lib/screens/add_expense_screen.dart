@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../services/finance_service.dart';
+import '../services/sync_service.dart';
 import '../services/fcm_service.dart';
 
 enum SplitType { equal, exact, percentage, mixed }
@@ -24,6 +25,7 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
   final FinanceService _financeService = FinanceService();
 
   bool _isLoading = false;
+  bool _isSubmitting = false;
   final TextEditingController _descController = TextEditingController();
   final TextEditingController _amountController = TextEditingController();
   String _description = '';
@@ -166,6 +168,7 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
   }
 
   void _saveExpense() async {
+    if (_isSubmitting) return;
     if (!_formKey.currentState!.validate()) return;
     _formKey.currentState!.save();
 
@@ -588,9 +591,11 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
                 
                 const SizedBox(height: 32),
                 FilledButton(
-                  onPressed: _saveExpense,
+                  onPressed: _isSubmitting ? null : _saveExpense,
                   style: FilledButton.styleFrom(padding: const EdgeInsets.all(16)),
-                  child: Text(widget.expenseId != null ? "Update Expense" : "Save Expense", style: const TextStyle(fontSize: 18)),
+                  child: _isSubmitting 
+                    ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                    : Text(widget.expenseId != null ? "Update Expense" : "Save Expense", style: const TextStyle(fontSize: 18)),
                 )
               ],
             ),

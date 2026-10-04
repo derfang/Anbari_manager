@@ -3,6 +3,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
 import 'screens/auth_screen.dart';
 import 'screens/auth_wrapper.dart';
+import 'widgets/global_connection_banner.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -24,6 +25,7 @@ class MyApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal),
         useMaterial3: true,
       ),
+      builder: (context, child) => GlobalConnectionBanner(child: child!),
       home: const AuthWrapper(), // Sets the launch screen
     );
   }

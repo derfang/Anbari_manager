@@ -165,7 +165,7 @@ class _RoomSettingsScreenState extends State<RoomSettingsScreen> {
             const SizedBox(height: 12),
             Expanded(
               child: StreamBuilder<QuerySnapshot>(
-                stream: _db.collection('users').where('roomId', isEqualTo: _roomId).snapshots(),
+                stream: _db.collection('users').where(Filter.or(Filter('roomId', isEqualTo: _roomId), Filter('roomIds', arrayContains: _roomId))).snapshots(),
                 builder: (context, snapshot) {
                   if (!snapshot.hasData) {
                     return const Center(child: CircularProgressIndicator());

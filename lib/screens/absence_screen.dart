@@ -88,7 +88,7 @@ class _AbsenceScreenState extends State<AbsenceScreen> {
       // Notify admins
       try {
         final adminsSnapshot = await _db.collection('users')
-            .where('roomIds', arrayContains: _roomId ?? userDoc['roomId'])
+            .where(Filter.or(Filter('roomId', isEqualTo: _roomId ?? userDoc['roomId']), Filter('roomIds', arrayContains: _roomId ?? userDoc['roomId'])))
             .where('role', isEqualTo: 'admin')
             .get();
         for (var adminDoc in adminsSnapshot.docs) {

@@ -1,7 +1,4 @@
 @echo off
-:: Ensure adb is in the PATH
-set PATH=%PATH%;%LOCALAPPDATA%\Android\Sdk\platform-tools
-
 title ADB Hotspot Auto-Connect
 echo ==========================================
 echo    ADB Hotspot Auto-Connect Script
@@ -10,7 +7,6 @@ echo.
 echo Please ensure your phone is plugged in via USB
 echo and your PC is connected to the phone's hotspot.
 echo.
-pause
 
 echo.
 echo [1/4] Disconnecting old ADB sessions...
@@ -23,7 +19,6 @@ if %ERRORLEVEL% neq 0 (
     echo.
     echo ERROR: Could not find your phone via USB. 
     echo Please make sure it is plugged in and USB debugging is allowed.
-    pause
     exit /b
 )
 
@@ -38,7 +33,6 @@ if "%PHONE_IP%"=="" (
     echo.
     echo ERROR: Could not find your Hotspot IP address. 
     echo Are you connected to the hotspot?
-    pause
     exit /b
 )
 
@@ -51,4 +45,3 @@ echo.
 echo ==========================================
 echo   SUCCESS! You can unplug the USB now.
 echo ==========================================
-pause

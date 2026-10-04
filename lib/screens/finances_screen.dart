@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
 import '../services/finance_service.dart';
+import '../services/sync_service.dart';
 import 'add_expense_screen.dart';
 
 class FinancesScreen extends StatefulWidget {
@@ -68,13 +69,22 @@ class _FinancesScreenState extends State<FinancesScreen> {
 
     if (confirm == true) {
       setState(() => _isLoading = true);
-      await _financeService.addSettlement(
-        roomId: widget.roomId,
-        fromUserId: debt.fromUserId,
-        toUserId: debt.toUserId,
-        amount: debt.amount,
-      );
-      await _loadData();
+      try {
+        await SyncService().runWithTimeout(
+          context: context,
+          action: () async {
+            await _financeService.addSettlement(
+              roomId: widget.roomId,
+              fromUserId: debt.fromUserId,
+              toUserId: debt.toUserId,
+              amount: debt.amount,
+            );
+            await _loadData();
+          }
+        );
+      } finally {
+        if (mounted) setState(() => _isLoading = false);
+      }
     }
   }
 
@@ -174,8 +184,17 @@ class _FinancesScreenState extends State<FinancesScreen> {
                       if (confirm == true) {
                         Navigator.pop(ctx);
                         setState(() => _isLoading = true);
-                        await _financeService.deleteTransaction(isExpense ? 'expenses' : 'settlements', activity['id']);
-                        await _loadData();
+                        try {
+                          await SyncService().runWithTimeout(
+                            context: context,
+                            action: () async {
+                              await _financeService.deleteTransaction(isExpense ? 'expenses' : 'settlements', activity['id']);
+                              await _loadData();
+                            }
+                          );
+                        } finally {
+                          if (mounted) setState(() => _isLoading = false);
+                        }
                       }
                     }, 
                     icon: const Icon(Icons.delete), 
