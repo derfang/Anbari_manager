@@ -330,43 +330,57 @@ class _FinancesScreenState extends State<FinancesScreen> {
                           children: allActivity.map((activity) {
                             if (activity['type'] == 'expense') {
                               List<String> declinedUsers = [];
-                              if (activity.containsKey('approvals')) {
+                              bool isFullyApproved = true;
+                              if (activity.containsKey('approvals') && activity['approvals'] is Map) {
                                 final approvals = activity['approvals'] as Map<String, dynamic>;
+                                isFullyApproved = approvals.values.every((status) => status == 'approved');
                                 approvals.forEach((uid, status) {
                                   if (status == 'declined') declinedUsers.add(_userNames[uid] ?? 'Unknown');
                                 });
                               }
                               
-                              return ListTile(
-                                onTap: () => _showTransactionDetails(activity),
-                                leading: const Icon(Icons.receipt, color: Colors.blueGrey),
-                                title: Text(activity['description'] ?? 'Expense'),
-                                subtitle: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text("${_userNames[activity['paidBy']]} paid \$${(activity['amount'] as num).toStringAsFixed(2)}"),
-                                    if (declinedUsers.isNotEmpty) ...[
-                                      const SizedBox(height: 4),
-                                      Text("Declined by: ${declinedUsers.join(', ')}", style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 12)),
-                                      if (activity['createdBy'] == _auth.currentUser?.uid)
-                                        TextButton.icon(
-                                          onPressed: () async {
-                                            final approvals = activity['approvals'] as Map<String, dynamic>;
-                                            for (String uid in approvals.keys) {
-                                              if (approvals[uid] == 'declined') {
-                                                await _financeService.updateExpenseApproval(activity['id'], uid, 'pending');
-                                              }
-                                            }
-                                            setState(() {});
-                                          },
-                                          icon: const Icon(Icons.refresh, size: 14),
-                                          label: const Text("Re-request Approval", style: TextStyle(fontSize: 12)),
-                                          style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: const Size(0, 0), tapTargetSize: MaterialTapTargetSize.shrinkWrap),
-                                        )
-                                    ]
-                                  ]
+                              return Container(
+                                margin: const EdgeInsets.symmetric(vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: !isFullyApproved ? Colors.amber.shade50 : Colors.transparent,
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: !isFullyApproved ? Border.all(color: Colors.amber.shade200) : null,
                                 ),
-                                trailing: Text(activity['date'] != null ? DateFormat('MMM d, h:mm a').format((activity['date'] as Timestamp).toDate()) : ''),
+                                child: ListTile(
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                  onTap: () => _showTransactionDetails(activity),
+                                  leading: Icon(
+                                    Icons.receipt, 
+                                    color: !isFullyApproved ? Colors.orange.shade700 : Colors.blueGrey,
+                                  ),
+                                  title: Text(activity['description'] ?? 'Expense'),
+                                  subtitle: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text("${_userNames[activity['paidBy']]} paid \$${(activity['amount'] as num).toStringAsFixed(2)}"),
+                                      if (declinedUsers.isNotEmpty) ...[
+                                        const SizedBox(height: 4),
+                                        Text("Declined by: ${declinedUsers.join(', ')}", style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 12)),
+                                        if (activity['createdBy'] == _auth.currentUser?.uid)
+                                          TextButton.icon(
+                                            onPressed: () async {
+                                              final approvals = activity['approvals'] as Map<String, dynamic>;
+                                              for (String uid in approvals.keys) {
+                                                if (approvals[uid] == 'declined') {
+                                                  await _financeService.updateExpenseApproval(activity['id'], uid, 'pending');
+                                                }
+                                              }
+                                              setState(() {});
+                                            },
+                                            icon: const Icon(Icons.refresh, size: 14),
+                                            label: const Text("Re-request Approval", style: TextStyle(fontSize: 12)),
+                                            style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: const Size(0, 0), tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                                          )
+                                      ]
+                                    ]
+                                  ),
+                                  trailing: Text(activity['date'] != null ? DateFormat('MMM d, h:mm a').format((activity['date'] as Timestamp).toDate()) : ''),
+                                ),
                               );
                             } else {
                               return ListTile(
