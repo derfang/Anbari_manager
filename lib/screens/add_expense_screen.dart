@@ -358,9 +358,11 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
         ? const Center(child: CircularProgressIndicator())
         : Form(
             key: _formKey,
-            child: ListView(
+            child: SingleChildScrollView(
               padding: const EdgeInsets.all(16),
-              children: [
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
                 TextFormField(
                   controller: _descController,
                   decoration: const InputDecoration(labelText: 'Description (e.g. Groceries)', border: OutlineInputBorder()),
@@ -600,6 +602,7 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
               ],
             ),
           ),
+        ),
     );
   }
 }

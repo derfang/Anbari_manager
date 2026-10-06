@@ -119,12 +119,19 @@ class _FinancesScreenState extends State<FinancesScreen> {
                 const Text("Splits:", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 8),
                 if (activity['splits'] != null)
-                  ...(activity['splits'] as Map<String, dynamic>).entries.map((e) => 
-                    Padding(
+                  ...(activity['splits'] as Map<String, dynamic>).entries.map((e) {
+                    final String userId = e.key;
+                    final double amount = (e.value as num).toDouble();
+                    
+                    final approvals = activity['approvals'] as Map<String, dynamic>?;
+                    final String status = approvals?[userId] ?? 'pending';
+                    final String statusText = status == 'approved' ? '(✅ Approved)' : '(⏳ Pending)';
+                    
+                    return Padding(
                       padding: const EdgeInsets.only(bottom: 4.0),
-                      child: Text("${_userNames[e.key] ?? 'Unknown'}: \$${(e.value as num).toStringAsFixed(2)}"),
-                    )
-                  ),
+                      child: Text("${_userNames[userId] ?? 'Unknown'}: \$${amount.toStringAsFixed(2)} $statusText"),
+                    );
+                  }),
               ] else ...[
                 Text("${_userNames[activity['fromUserId']]} paid ${_userNames[activity['toUserId']]}", style: const TextStyle(fontSize: 16)),
                 const SizedBox(height: 8),
