@@ -115,7 +115,7 @@ class _AuthScreenState extends State<AuthScreen> {
               children: [
                 const Icon(Icons.home_work_rounded, size: 80, color: Colors.teal),
                 const SizedBox(height: 24),
-                const Text("Roommate Chores", style: TextStyle(fontSize: 36, fontWeight: FontWeight.bold, color: Colors.teal)),
+                const Text("Anbari Manager", style: TextStyle(fontSize: 36, fontWeight: FontWeight.bold, color: Colors.teal)),
                 const SizedBox(height: 12),
                 const Text("Manage your apartment peaceably.", style: TextStyle(fontSize: 16, color: Colors.blueGrey)),
                 const SizedBox(height: 40),

@@ -95,6 +95,28 @@ class ChoreService {
     final endDate = nextBounds[1];      
 
     try {
+      // Purge any uncompleted legacy assignments (created by old app versions without 'v' field)
+      final existingSnapshot = await _db.collection('assignments')
+          .where('roomId', isEqualTo: roomId)
+          .get();
+
+      final batch = _db.batch();
+      bool hasLegacy = false;
+      for (var doc in existingSnapshot.docs) {
+        final data = doc.data();
+        if (data['isCompleted'] == false && data['v'] == null) {
+          final date = (data['date'] as Timestamp).toDate();
+          if (date.compareTo(startDate) >= 0 && date.compareTo(endDate) <= 0) {
+            batch.delete(doc.reference);
+            hasLegacy = true;
+          }
+        }
+      }
+      if (hasLegacy) {
+        await batch.commit();
+        debugPrint("Purged legacy assignments from old app versions.");
+      }
+
       await generateWeeklySchedule(
         roomId: roomId,
         startDate: startDate,
