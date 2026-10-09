@@ -142,9 +142,35 @@ class NotificationService {
       sound: RawResourceAndroidNotificationSound('new_notification'),
     );
     
-    await _localNotifs
-        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
-        ?.createNotificationChannel(channel);
+    // Create notification channels for reminders
+    final androidPlugin = _localNotifs.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+    if (androidPlugin != null) {
+      await androidPlugin.createNotificationChannel(channel);
+      await androidPlugin.createNotificationChannel(const AndroidNotificationChannel(
+        'daily_reminders',
+        'Daily Reminders',
+        description: 'Reminders for unfinished daily chores',
+        importance: Importance.max,
+        playSound: true,
+        sound: RawResourceAndroidNotificationSound('new_notification'),
+      ));
+      await androidPlugin.createNotificationChannel(const AndroidNotificationChannel(
+        'weekly_summary',
+        'Weekly Summaries',
+        description: 'Saturday summary of upcoming chores for the week',
+        importance: Importance.max,
+        playSound: true,
+        sound: RawResourceAndroidNotificationSound('new_notification'),
+      ));
+      await androidPlugin.createNotificationChannel(const AndroidNotificationChannel(
+        'expense_reminders',
+        'Expense Reminders',
+        description: 'Bi-weekly reminders to settle roommate expenses',
+        importance: Importance.max,
+        playSound: true,
+        sound: RawResourceAndroidNotificationSound('new_notification'),
+      ));
+    }
 
     // Request permissions for push
     NotificationSettings settings = await _fcm.requestPermission(
@@ -193,38 +219,203 @@ class NotificationService {
     }
   }
 
-  /// Schedule a local reminder for 7 PM today.
-  Future<void> scheduleDailyReminder({required String choreName, required String body}) async {
-    // We cancel any existing reminder first to avoid duplicates
-    await _localNotifs.cancel(id: 1); // 1 is the ID for the daily reminder
+  /// Maps chore title to guilt-tripping playful copy & matching drawable picture
+  Map<String, String> getChoreReminderCopy(String choreTitle) {
+    final lower = choreTitle.toLowerCase();
+    if (lower.contains('trash')) {
+      return {
+        'title': 'The Trash is on Strike! 🪧',
+        'body': "It won't walk itself out. Take it out before it gains sentience and starts paying rent!",
+        'image': 'chore_trash',
+      };
+    } else if (lower.contains('bathroom')) {
+      return {
+        'title': 'Biological Hazard Warning ☣️',
+        'body': 'A new ecosystem is forming in the bathroom. Clean it before your roommates disown you!',
+        'image': 'chore_bathroom',
+      };
+    } else if (lower.contains('kitchen') || lower.contains('counter')) {
+      return {
+        'title': 'Sticky with Regret 🍳',
+        'body': 'The kitchen counters are calling for help. Wipe them down before the ants sign a lease!',
+        'image': 'chore_kitchen',
+      };
+    } else if (lower.contains('vacuum')) {
+      return {
+        'title': 'The Dust Bunnies are Plotting 🐰',
+        'body': "The floors won't clean themselves. Time to vacuum before the apartment turns into a desert!",
+        'image': 'chore_vacuum',
+      };
+    } else if (lower.contains('mop') || lower.contains('sweep')) {
+      return {
+        'title': 'The Dust Bunnies are Plotting 🐰',
+        'body': "The floors won't clean themselves. Time to sweep & mop before the apartment turns into a desert!",
+        'image': 'chore_mop',
+      };
+    }
+    return {
+      'title': 'Your Roommates are Watching... 👀',
+      'body': 'You still haven\'t finished "$choreTitle" today. Don\'t let your score tank into the negatives!',
+      'image': 'chore_reminder',
+    };
+  }
 
-    final now = tz.TZDateTime.now(tz.local);
-    var scheduledDate = tz.TZDateTime(tz.local, now.year, now.month, now.day, 19, 0); // 7:00 PM
-    
-    if (scheduledDate.isBefore(now)) {
-      // If it's already past 7 PM, don't schedule it for today.
-      return; 
+  /// 1. Schedule a local reminder for 7 PM today if an uncompleted chore is due today (Alarm ID 1)
+  Future<void> scheduleDailyChoreReminder(String? choreTitle) async {
+    await _localNotifs.cancel(id: 1);
+
+    if (choreTitle == null || choreTitle.isEmpty) {
+      debugPrint("No unfinished chore due today; daily 7 PM reminder cleared.");
+      return;
     }
 
-    const AndroidNotificationDetails androidPlatformChannelSpecifics = AndroidNotificationDetails(
+    final now = tz.TZDateTime.now(tz.local);
+    var scheduledDate = tz.TZDateTime(tz.local, now.year, now.month, now.day, 19, 0); // 7:00 PM today
+
+    if (scheduledDate.isBefore(now)) {
+      // Already past 7 PM today
+      return;
+    }
+
+    final copy = getChoreReminderCopy(choreTitle);
+
+    final androidPlatformChannelSpecifics = AndroidNotificationDetails(
       'daily_reminders',
       'Daily Reminders',
-      channelDescription: 'Reminders for unfinished chores',
+      channelDescription: 'Reminders for unfinished daily chores',
       importance: Importance.max,
       priority: Priority.high,
+      playSound: true,
+      sound: const RawResourceAndroidNotificationSound('new_notification'),
+      largeIcon: DrawableResourceAndroidBitmap(copy['image']!),
+      styleInformation: BigTextStyleInformation(copy['body']!, contentTitle: copy['title']!),
     );
-    const NotificationDetails platformChannelSpecifics = NotificationDetails(android: androidPlatformChannelSpecifics);
+
+    final platformChannelSpecifics = NotificationDetails(android: androidPlatformChannelSpecifics);
 
     await _localNotifs.zonedSchedule(
       id: 1,
-      title: 'Duolingo Owl 🦉',
+      title: copy['title'],
+      body: copy['body'],
+      scheduledDate: scheduledDate,
+      notificationDetails: platformChannelSpecifics,
+      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+    );
+
+    debugPrint("Scheduled daily chore reminder for $scheduledDate with image ${copy['image']}");
+  }
+
+  /// 2. Schedule Saturday 6:50 PM weekly chore summary (Alarm ID 2)
+  Future<void> scheduleSaturdayWeeklySummary({required int count, required List<String> choreTitles}) async {
+    await _localNotifs.cancel(id: 2);
+
+    final now = tz.TZDateTime.now(tz.local);
+
+    int daysUntilSaturday = (DateTime.saturday - now.weekday + 7) % 7;
+    var scheduledDate = tz.TZDateTime(tz.local, now.year, now.month, now.day + daysUntilSaturday, 18, 50); // 6:50 PM
+
+    // If today is Saturday and it's already past 6:50 PM, schedule for next Saturday
+    if (scheduledDate.isBefore(now)) {
+      scheduledDate = scheduledDate.add(const Duration(days: 7));
+    }
+
+    String title;
+    String body;
+    if (count > 0) {
+      final listStr = choreTitles.take(3).join(', ');
+      title = 'Fate Has Spoken 📋';
+      body = 'You have $count chore(s) lined up this week ($listStr). Time to earn your keep and save your points!';
+    } else {
+      title = 'Living the High Life 🛋️';
+      body = 'Zero chores assigned to you this week! Sit back, relax, and watch your roommates do all the work.';
+    }
+
+    final androidPlatformChannelSpecifics = AndroidNotificationDetails(
+      'weekly_summary',
+      'Weekly Summaries',
+      channelDescription: 'Saturday summary of upcoming chores for the week',
+      importance: Importance.max,
+      priority: Priority.high,
+      playSound: true,
+      sound: const RawResourceAndroidNotificationSound('new_notification'),
+      largeIcon: const DrawableResourceAndroidBitmap('chore_reminder'),
+      styleInformation: BigTextStyleInformation(body, contentTitle: title),
+    );
+
+    final platformChannelSpecifics = NotificationDetails(android: androidPlatformChannelSpecifics);
+
+    await _localNotifs.zonedSchedule(
+      id: 2,
+      title: title,
       body: body,
       scheduledDate: scheduledDate,
       notificationDetails: platformChannelSpecifics,
       androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
     );
-    
-    debugPrint("Scheduled local notification for $scheduledDate");
+
+    debugPrint("Scheduled Saturday weekly summary for $scheduledDate");
+  }
+
+  /// 3. Schedule bi-weekly Friday 6:00 PM expense settle-up starting 1st of Aban (October 23, 2026) (Alarm ID 3)
+  Future<void> scheduleBiWeeklyFridaySettleUp() async {
+    await _localNotifs.cancel(id: 3);
+
+    final now = tz.TZDateTime.now(tz.local);
+
+    // Anchor: Friday, October 23, 2026 (1st of Aban 1405) at 18:00
+    final anchor = tz.TZDateTime(tz.local, 2026, 10, 23, 18, 0);
+
+    tz.TZDateTime scheduledDate;
+    if (now.isBefore(anchor)) {
+      scheduledDate = anchor;
+    } else {
+      final daysSinceAnchor = now.difference(anchor).inDays;
+      final int periodsPassed = daysSinceAnchor ~/ 14;
+      var candidate = anchor.add(Duration(days: periodsPassed * 14));
+      if (!candidate.isAfter(now)) {
+        candidate = candidate.add(const Duration(days: 14));
+      }
+      scheduledDate = candidate;
+    }
+
+    const title = 'Pay Your Debts! 💰';
+    const body = 'Friendship is priceless, but rent and groceries aren\'t. Open Finances to review expenses and square up balances!';
+
+    final androidPlatformChannelSpecifics = const AndroidNotificationDetails(
+      'expense_reminders',
+      'Expense Reminders',
+      channelDescription: 'Bi-weekly reminders to settle roommate expenses',
+      importance: Importance.max,
+      priority: Priority.high,
+      playSound: true,
+      sound: RawResourceAndroidNotificationSound('new_notification'),
+      largeIcon: DrawableResourceAndroidBitmap('new_expense'),
+      styleInformation: BigTextStyleInformation(body, contentTitle: title),
+    );
+
+    final platformChannelSpecifics = NotificationDetails(android: androidPlatformChannelSpecifics);
+
+    await _localNotifs.zonedSchedule(
+      id: 3,
+      title: title,
+      body: body,
+      scheduledDate: scheduledDate,
+      notificationDetails: platformChannelSpecifics,
+      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+    );
+
+    debugPrint("Scheduled bi-weekly Friday settle-up for $scheduledDate");
+  }
+
+  /// Unified sync method to schedule all 3 notifications
+  Future<void> syncAllReminders({
+    required String? todayChoreTitle,
+    required int weekChoresCount,
+    required List<String> weekChoreTitles,
+  }) async {
+    await scheduleDailyChoreReminder(todayChoreTitle);
+    await scheduleSaturdayWeeklySummary(count: weekChoresCount, choreTitles: weekChoreTitles);
+    await scheduleBiWeeklyFridaySettleUp();
   }
 
   /// Cancel the daily reminder (e.g. if the user completes their chore early)

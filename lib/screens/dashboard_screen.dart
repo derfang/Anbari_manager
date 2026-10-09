@@ -7,7 +7,6 @@ import 'auth_screen.dart';
 import 'absence_screen.dart';
 import 'room_settings_screen.dart';
 import '../services/chore_service.dart';
-import '../services/sync_service.dart';
 import 'room_selection_screen.dart';
 import '../utils/chore_icons.dart';
 import '../services/finance_service.dart';
@@ -658,7 +657,38 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   return true;
                 }).toList();
 
-                // Notification Logic moved to Cloudflare Cron Job
+                // Synchronize local reminders (Daily 7 PM, Saturday 6:50 PM, Bi-weekly Friday 6 PM)
+                final now = DateTime.now();
+                final todayStr = "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
+                String? todayChoreTitle;
+                for (final doc in myTasks) {
+                  final data = doc.data() as Map<String, dynamic>;
+                  final dStr = data['day'] as String?;
+                  if (dStr == todayStr) {
+                    todayChoreTitle = data['choreTitle'] ?? data['choreId'];
+                    break;
+                  }
+                  if (data['date'] is Timestamp) {
+                    final d = (data['date'] as Timestamp).toDate();
+                    if (d.year == now.year && d.month == now.month && d.day == now.day) {
+                      todayChoreTitle = data['choreTitle'] ?? data['choreId'];
+                      break;
+                    }
+                  }
+                }
+
+                final weekChoresCount = myTasks.length;
+                final weekChoreTitles = myTasks
+                    .map((doc) => ((doc.data() as Map<String, dynamic>)['choreTitle'] ?? (doc.data() as Map<String, dynamic>)['choreId'] ?? 'Chore').toString())
+                    .toList();
+
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  NotificationService().syncAllReminders(
+                    todayChoreTitle: todayChoreTitle,
+                    weekChoresCount: weekChoresCount,
+                    weekChoreTitles: weekChoreTitles,
+                  );
+                });
 
                 if (myTasks.isEmpty) {
                   return const Card(
@@ -706,6 +736,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                     doerIds: [data['assignedToUserId']],
                                   );
                                   await doc.reference.update({'isCompleted': true});
+                                  await NotificationService().cancelDailyReminder();
                                   // Clear any existing reports so a fresh report can be filed
                                   final oldReports = await _db.collection('reports')
                                       .where('assignmentId', isEqualTo: doc.id)
@@ -968,6 +999,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                                                 doerIds: [assignedUserId],
                                                               );
                                                               await _db.collection('assignments').doc(assignmentDocId).update({'isCompleted': true});
+                                                              await NotificationService().cancelDailyReminder();
                                                             } catch (e) {
                                                               if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: `$e`")));
                                                             }
