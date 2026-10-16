@@ -33,16 +33,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   bool _isAdmin = false;
   int _weekOffset = 0;
 
-  // The custom regional week layout (Saturday to Friday)
-  final List<String> _weekDays = [
-    'Saturday',
-    'Sunday',
-    'Monday',
-    'Tuesday',
-    'Wednesday',
-    'Thursday',
-    'Friday'
-  ];
 
   @override
   void initState() {
@@ -657,23 +647,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   return true;
                 }).toList();
 
-                // Synchronize local reminders (Daily 7 PM, Saturday 6:50 PM, Bi-weekly Friday 6 PM)
-                final now = DateTime.now();
-                final todayStr = "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
-                String? todayChoreTitle;
+                // Synchronize local reminders for the entire week (at 7:00 PM for each task), Saturday summary, & Bi-weekly expense reminder
+                final List<Map<String, dynamic>> upcomingTasks = [];
                 for (final doc in myTasks) {
                   final data = doc.data() as Map<String, dynamic>;
-                  final dStr = data['day'] as String?;
-                  if (dStr == todayStr) {
-                    todayChoreTitle = data['choreTitle'] ?? data['choreId'];
-                    break;
-                  }
+                  final String title = (data['choreTitle'] ?? data['choreId'] ?? 'Chore').toString();
+                  DateTime? choreDate;
                   if (data['date'] is Timestamp) {
-                    final d = (data['date'] as Timestamp).toDate();
-                    if (d.year == now.year && d.month == now.month && d.day == now.day) {
-                      todayChoreTitle = data['choreTitle'] ?? data['choreId'];
-                      break;
-                    }
+                    choreDate = (data['date'] as Timestamp).toDate();
+                  } else if (data['day'] is String) {
+                    try {
+                      final parts = (data['day'] as String).split('-');
+                      if (parts.length == 3) {
+                        choreDate = DateTime(int.parse(parts[0]), int.parse(parts[1]), int.parse(parts[2]));
+                      }
+                    } catch (_) {}
+                  }
+                  if (choreDate != null) {
+                    upcomingTasks.add({'title': title, 'date': choreDate});
                   }
                 }
 
@@ -684,7 +675,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
                 WidgetsBinding.instance.addPostFrameCallback((_) {
                   NotificationService().syncAllReminders(
-                    todayChoreTitle: todayChoreTitle,
+                    upcomingTasks: upcomingTasks,
                     weekChoresCount: weekChoresCount,
                     weekChoreTitles: weekChoreTitles,
                   );

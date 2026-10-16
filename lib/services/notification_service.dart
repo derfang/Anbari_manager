@@ -122,7 +122,16 @@ class NotificationService {
       tz.setLocalLocation(tz.getLocation(currentTimeZone));
     } catch (e) {
       debugPrint("Failed to get local timezone: $e");
-      tz.setLocalLocation(tz.getLocation('UTC'));
+      try {
+        final offset = DateTime.now().timeZoneOffset;
+        if (offset.inMinutes == 210) {
+          tz.setLocalLocation(tz.getLocation('Asia/Tehran'));
+        } else {
+          tz.setLocalLocation(tz.getLocation('UTC'));
+        }
+      } catch (_) {
+        tz.setLocalLocation(tz.getLocation('UTC'));
+      }
     }
 
     // Setup local notifications
@@ -132,19 +141,23 @@ class NotificationService {
     
     await _localNotifs.initialize(settings: initSettings);
 
-    // Explicitly create the channel so background FCM messages can use it!
-    const AndroidNotificationChannel channel = AndroidNotificationChannel(
-      'roommate_chores_channel_v3',
-      'Roommate Chores Notifications',
-      description: 'Notifications for chores and expenses',
-      importance: Importance.max,
-      playSound: true,
-      sound: RawResourceAndroidNotificationSound('new_notification'),
-    );
-    
     // Create notification channels for reminders
     final androidPlugin = _localNotifs.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
     if (androidPlugin != null) {
+      // Request Android 13+ POST_NOTIFICATIONS runtime permission
+      await androidPlugin.requestNotificationsPermission();
+      // Request Android 12/14+ SCHEDULE_EXACT_ALARM runtime permission
+      await androidPlugin.requestExactAlarmsPermission();
+
+      // Explicitly create the channel so background FCM messages can use it!
+      const AndroidNotificationChannel channel = AndroidNotificationChannel(
+        'roommate_chores_channel_v3',
+        'Roommate Chores Notifications',
+        description: 'Notifications for chores and expenses',
+        importance: Importance.max,
+        playSound: true,
+        sound: RawResourceAndroidNotificationSound('new_notification'),
+      );
       await androidPlugin.createNotificationChannel(channel);
       await androidPlugin.createNotificationChannel(const AndroidNotificationChannel(
         'daily_reminders',
@@ -260,49 +273,107 @@ class NotificationService {
     };
   }
 
-  /// 1. Schedule a local reminder for 7 PM today if an uncompleted chore is due today (Alarm ID 1)
-  Future<void> scheduleDailyChoreReminder(String? choreTitle) async {
-    await _localNotifs.cancel(id: 1);
+  /// Safely schedule an alarm with exactAllowWhileIdle, falling back to inexactAllowWhileIdle
+  /// if exact alarm permission is not granted on Android 12/14+ to prevent SecurityException.
+  Future<void> _safeZonedSchedule({
+    required int id,
+    required String? title,
+    required String? body,
+    required tz.TZDateTime scheduledDate,
+    required NotificationDetails notificationDetails,
+  }) async {
+    try {
+      await _localNotifs.zonedSchedule(
+        id: id,
+        title: title,
+        body: body,
+        scheduledDate: scheduledDate,
+        notificationDetails: notificationDetails,
+        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+      );
+    } catch (e) {
+      debugPrint("exactAllowWhileIdle failed ($e); falling back to inexactAllowWhileIdle");
+      await _localNotifs.zonedSchedule(
+        id: id,
+        title: title,
+        body: body,
+        scheduledDate: scheduledDate,
+        notificationDetails: notificationDetails,
+        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+      );
+    }
+  }
 
-    if (choreTitle == null || choreTitle.isEmpty) {
-      debugPrint("No unfinished chore due today; daily 7 PM reminder cleared.");
+  /// Cancel all previously scheduled chore reminder alarms (IDs 100 to 199 & legacy 1)
+  Future<void> cancelAllTaskReminders() async {
+    for (int id = 100; id < 200; id++) {
+      await _localNotifs.cancel(id: id);
+    }
+    await _localNotifs.cancel(id: 1);
+    debugPrint("Cancelled all task reminder schedules (IDs 100-199 & 1)");
+  }
+
+  /// 1. Schedule all upcoming chores for the entire week at 7:00 PM on their respective days (Alarm IDs 100+)
+  Future<void> scheduleWeekChores(List<Map<String, dynamic>> tasks) async {
+    await cancelAllTaskReminders();
+
+    if (tasks.isEmpty) {
+      debugPrint("No upcoming tasks to schedule for the week.");
       return;
     }
 
     final now = tz.TZDateTime.now(tz.local);
-    var scheduledDate = tz.TZDateTime(tz.local, now.year, now.month, now.day, 19, 0); // 7:00 PM today
+    int alarmId = 100;
 
-    if (scheduledDate.isBefore(now)) {
-      // Already past 7 PM today
-      return;
+    for (final task in tasks) {
+      if (alarmId >= 200) break; // Limit safety range
+
+      final String choreTitle = (task['title'] ?? 'Chore').toString();
+      final DateTime? date = task['date'] as DateTime?;
+      if (date == null) continue;
+
+      // Target reminder time is 7:00 PM on the task's due date
+      final scheduledDate = tz.TZDateTime(
+        tz.local, 
+        date.year, 
+        date.month, 
+        date.day, 
+        19, 
+        0
+      );
+
+      // Only schedule if 7:00 PM on that day is in the future
+      if (!scheduledDate.isAfter(now)) {
+        continue;
+      }
+
+      final copy = getChoreReminderCopy(choreTitle);
+
+      final androidPlatformChannelSpecifics = AndroidNotificationDetails(
+        'daily_reminders',
+        'Daily Reminders',
+        channelDescription: 'Reminders for unfinished daily chores',
+        importance: Importance.max,
+        priority: Priority.high,
+        playSound: true,
+        sound: const RawResourceAndroidNotificationSound('new_notification'),
+        largeIcon: DrawableResourceAndroidBitmap(copy['image']!),
+        styleInformation: BigTextStyleInformation(copy['body']!, contentTitle: copy['title']!),
+      );
+
+      final platformChannelSpecifics = NotificationDetails(android: androidPlatformChannelSpecifics);
+
+      await _safeZonedSchedule(
+        id: alarmId,
+        title: copy['title'],
+        body: copy['body'],
+        scheduledDate: scheduledDate,
+        notificationDetails: platformChannelSpecifics,
+      );
+
+      debugPrint("Scheduled chore reminder [ID $alarmId] for '$choreTitle' at $scheduledDate");
+      alarmId++;
     }
-
-    final copy = getChoreReminderCopy(choreTitle);
-
-    final androidPlatformChannelSpecifics = AndroidNotificationDetails(
-      'daily_reminders',
-      'Daily Reminders',
-      channelDescription: 'Reminders for unfinished daily chores',
-      importance: Importance.max,
-      priority: Priority.high,
-      playSound: true,
-      sound: const RawResourceAndroidNotificationSound('new_notification'),
-      largeIcon: DrawableResourceAndroidBitmap(copy['image']!),
-      styleInformation: BigTextStyleInformation(copy['body']!, contentTitle: copy['title']!),
-    );
-
-    final platformChannelSpecifics = NotificationDetails(android: androidPlatformChannelSpecifics);
-
-    await _localNotifs.zonedSchedule(
-      id: 1,
-      title: copy['title'],
-      body: copy['body'],
-      scheduledDate: scheduledDate,
-      notificationDetails: platformChannelSpecifics,
-      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-    );
-
-    debugPrint("Scheduled daily chore reminder for $scheduledDate with image ${copy['image']}");
   }
 
   /// 2. Schedule Saturday 6:50 PM weekly chore summary (Alarm ID 2)
@@ -344,13 +415,12 @@ class NotificationService {
 
     final platformChannelSpecifics = NotificationDetails(android: androidPlatformChannelSpecifics);
 
-    await _localNotifs.zonedSchedule(
+    await _safeZonedSchedule(
       id: 2,
       title: title,
       body: body,
       scheduledDate: scheduledDate,
       notificationDetails: platformChannelSpecifics,
-      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
     );
 
     debugPrint("Scheduled Saturday weekly summary for $scheduledDate");
@@ -395,32 +465,31 @@ class NotificationService {
 
     final platformChannelSpecifics = NotificationDetails(android: androidPlatformChannelSpecifics);
 
-    await _localNotifs.zonedSchedule(
+    await _safeZonedSchedule(
       id: 3,
       title: title,
       body: body,
       scheduledDate: scheduledDate,
       notificationDetails: platformChannelSpecifics,
-      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
     );
 
     debugPrint("Scheduled bi-weekly Friday settle-up for $scheduledDate");
   }
 
-  /// Unified sync method to schedule all 3 notifications
+  /// Unified sync method to schedule all notifications
   Future<void> syncAllReminders({
-    required String? todayChoreTitle,
+    required List<Map<String, dynamic>> upcomingTasks,
     required int weekChoresCount,
     required List<String> weekChoreTitles,
   }) async {
-    await scheduleDailyChoreReminder(todayChoreTitle);
+    await scheduleWeekChores(upcomingTasks);
     await scheduleSaturdayWeeklySummary(count: weekChoresCount, choreTitles: weekChoreTitles);
     await scheduleBiWeeklyFridaySettleUp();
   }
 
-  /// Cancel the daily reminder (e.g. if the user completes their chore early)
+  /// Cancel all chore reminder schedules
   Future<void> cancelDailyReminder() async {
-    await _localNotifs.cancel(id: 1);
-    debugPrint("Cancelled daily reminder");
+    await cancelAllTaskReminders();
+    debugPrint("Cancelled daily chore reminders");
   }
 }
