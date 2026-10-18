@@ -14,6 +14,7 @@ import 'finances_screen.dart';
 import 'add_expense_screen.dart';
 import '../services/fcm_service.dart';
 import '../services/notification_service.dart';
+import '../widgets/force_insert_task_dialog.dart';
 
 class DashboardScreen extends StatefulWidget {
   final String? roomId;
@@ -111,6 +112,31 @@ class _DashboardScreenState extends State<DashboardScreen> {
       });
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error undoing chore: $e")));
+    }
+  }
+
+  Future<void> _handleSelfCancel({
+    required String assignmentId,
+    required String choreId,
+    required String choreTitle,
+    required String assignedToUserId,
+  }) async {
+    try {
+      await _choreService.cancelSelfCompletion(
+        roomId: _roomId!,
+        choreId: choreId,
+        assignmentId: assignmentId,
+        doerIds: [assignedToUserId],
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Undone \"$choreTitle\"! Marked as incomplete.")),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error cancelling completion: $e")));
+      }
     }
   }
 
@@ -735,6 +761,33 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   for (final r in oldReports.docs) {
                                     await r.reference.delete();
                                   }
+
+                                  if (context.mounted) {
+                                    final choreTitle = (data['choreTitle'] ?? data['choreId'] ?? 'Chore').toString();
+                                    final assignmentId = doc.id;
+                                    final choreId = data['choreId'];
+                                    final assignedUserId = data['assignedToUserId'];
+
+                                    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text("Marked \"$choreTitle\" done!"),
+                                        duration: const Duration(seconds: 6),
+                                        action: SnackBarAction(
+                                          label: "UNDO",
+                                          textColor: Colors.amber,
+                                          onPressed: () {
+                                            _handleSelfCancel(
+                                              assignmentId: assignmentId,
+                                              choreId: choreId,
+                                              choreTitle: choreTitle,
+                                              assignedToUserId: assignedUserId,
+                                            );
+                                          },
+                                        ),
+                                      ),
+                                    );
+                                  }
                                 } catch (e) {
                                   if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
                                 }
@@ -774,9 +827,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           "Matrix: $startFormat - $endFormat",
                           style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                         ),
-                        IconButton(
-                          icon: const Icon(Icons.chevron_right), 
-                          onPressed: _weekOffset < 1 ? () => setState(() => _weekOffset++) : null,
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (_isAdmin && _roomId != null)
+                              IconButton(
+                                icon: const Icon(Icons.assignment_ind, color: Colors.teal),
+                                tooltip: "Force Insert Task",
+                                onPressed: () => ForceInsertTaskDialog.show(context, _roomId!),
+                              ),
+                            IconButton(
+                              icon: const Icon(Icons.chevron_right), 
+                              onPressed: _weekOffset < 1 ? () => setState(() => _weekOffset++) : null,
+                            ),
+                          ],
                         ),
                       ],
                     ),
@@ -952,11 +1016,40 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                               child: InkWell(
                                               onTap: () {
                                                 if (isDone) {
-                                                  _showFalseReportDialog(
-                                                    assignmentId: assignmentDocId,
-                                                    choreTitle: chore['title'],
-                                                    dayOfWeek: weekDays[currentDay.weekday - 1],
-                                                  );
+                                                  if (isMyChore) {
+                                                    showDialog(
+                                                      context: context,
+                                                      builder: (ctx) => AlertDialog(
+                                                        title: const Text("Chore Completed"),
+                                                        content: Text("You marked \"${chore['title']}\" done.\n\nDid you mark it done by mistake?"),
+                                                        actions: [
+                                                          TextButton(
+                                                            onPressed: () => Navigator.pop(ctx), 
+                                                            child: const Text("Keep Done"),
+                                                          ),
+                                                          FilledButton(
+                                                            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                                                            onPressed: () async {
+                                                              Navigator.pop(ctx);
+                                                              await _handleSelfCancel(
+                                                                assignmentId: assignmentDocId,
+                                                                choreId: chore.id,
+                                                                choreTitle: chore['title'],
+                                                                assignedToUserId: assignedUserId,
+                                                              );
+                                                            },
+                                                            child: const Text("Cancel Completion (Undo)"),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                    );
+                                                  } else {
+                                                    _showFalseReportDialog(
+                                                      assignmentId: assignmentDocId,
+                                                      choreTitle: chore['title'],
+                                                      dayOfWeek: weekDays[currentDay.weekday - 1],
+                                                    );
+                                                  }
                                                 } else if (isDisputed) {
                                                   if (isMyChore) {
                                                     _requestCompletionVoteDialog(
@@ -991,6 +1084,28 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                                               );
                                                               await _db.collection('assignments').doc(assignmentDocId).update({'isCompleted': true});
                                                               await NotificationService().cancelDailyReminder();
+
+                                                              if (context.mounted) {
+                                                                ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                                                                ScaffoldMessenger.of(context).showSnackBar(
+                                                                  SnackBar(
+                                                                    content: Text("Marked \"${chore['title']}\" done!"),
+                                                                    duration: const Duration(seconds: 6),
+                                                                    action: SnackBarAction(
+                                                                      label: "UNDO",
+                                                                      textColor: Colors.amber,
+                                                                      onPressed: () {
+                                                                        _handleSelfCancel(
+                                                                          assignmentId: assignmentDocId,
+                                                                          choreId: chore.id,
+                                                                          choreTitle: chore['title'],
+                                                                          assignedToUserId: assignedUserId,
+                                                                        );
+                                                                      },
+                                                                    ),
+                                                                  ),
+                                                                );
+                                                              }
                                                             } catch (e) {
                                                               if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: `$e`")));
                                                             }

@@ -209,6 +209,7 @@ class ChoreService {
       batch.set(historyRef, {
         'roomId': roomId,
         'choreId': choreId,
+        'assignmentId': assignmentId,
         'completedBy': doerIds,
         'completedAt': FieldValue.serverTimestamp(),
         'effortValue': effortValue,
@@ -230,6 +231,164 @@ class ChoreService {
     } finally {
       _processingAssignments.remove(assignmentId);
     }
+  }
+
+  /// Cancels a completion made by mistake without triggering a dispute or vote.
+  /// Reverts zero-sum points, cleans up history, and returns assignment to pending state.
+  Future<void> cancelSelfCompletion({
+    required String roomId,
+    required String choreId,
+    required String assignmentId,
+    required List<String> doerIds,
+  }) async {
+    if (_processingAssignments.contains(assignmentId)) {
+      debugPrint("Already processing this assignment. Aborting.");
+      return;
+    }
+    _processingAssignments.add(assignmentId);
+    try {
+      final assignmentDoc = await _db.collection('assignments').doc(assignmentId).get();
+      if (!assignmentDoc.exists) return;
+      if (assignmentDoc.data()?['isCompleted'] == false) {
+        debugPrint("Chore is already not completed. Aborting.");
+        return;
+      }
+
+      final choreDoc = await _db.collection('chores').doc(choreId).get();
+      if (!choreDoc.exists) throw Exception("Chore not found");
+
+      final double effortValue = (choreDoc.data()?['points'] ?? 0).toDouble();
+
+      final usersSnapshot = await _db
+          .collection('users')
+          .where(Filter.or(Filter('roomId', isEqualTo: roomId), Filter('roomIds', arrayContains: roomId)))
+          .get();
+
+      List<DocumentSnapshot> presentSlackers = [];
+      List<DocumentSnapshot> doers = [];
+
+      for (var doc in usersSnapshot.docs) {
+        final data = doc.data() as Map<String, dynamic>;
+        final List<dynamic> roomIds = data['roomIds'] ?? [];
+        if (data['roomId'] != roomId && !roomIds.contains(roomId)) continue;
+
+        if (doerIds.contains(doc.id)) {
+          doers.add(doc);
+        } else if (data['isAbsent'] != true) {
+          presentSlackers.add(doc);
+        }
+      }
+
+      if (presentSlackers.isEmpty) {
+        throw Exception("No slackers! Math engine aborted to prevent errors.");
+      }
+
+      final double slackerTax = (effortValue * doers.length) / presentSlackers.length;
+      final batch = _db.batch();
+
+      // Deduct reward from the doers
+      for (var doer in doers) {
+        batch.update(doer.reference, {
+          'roomPoints.$roomId': FieldValue.increment(-effortValue),
+        });
+      }
+
+      // Return tax to the slackers
+      for (var slacker in presentSlackers) {
+        batch.update(slacker.reference, {
+          'roomPoints.$roomId': FieldValue.increment(slackerTax),
+        });
+      }
+
+      // Mark assignment uncompleted and NOT disputed
+      batch.update(assignmentDoc.reference, {
+        'isCompleted': false,
+        'disputed': false,
+        'v': 2,
+      });
+
+      // Delete history log for this assignment
+      final historyQuery = await _db.collection('chore_history')
+          .where('roomId', isEqualTo: roomId)
+          .where('assignmentId', isEqualTo: assignmentId)
+          .get();
+      for (var h in historyQuery.docs) {
+        batch.delete(h.reference);
+      }
+
+      // Delete any pending false report filed for this assignment
+      final reportsQuery = await _db.collection('reports')
+          .where('assignmentId', isEqualTo: assignmentId)
+          .get();
+      for (var r in reportsQuery.docs) {
+        batch.delete(r.reference);
+      }
+
+      await batch.commit();
+      debugPrint("Self-completion cancelled: zero-sum points reverted and status cleared.");
+
+      // Recalculate next week's schedule with the reverted points
+      await recalculateSchedule(roomId, startWeekOffset: 1, endWeekOffset: 1);
+    } catch (e) {
+      debugPrint("Error cancelling self-completion: $e");
+      rethrow;
+    } finally {
+      _processingAssignments.remove(assignmentId);
+    }
+  }
+
+  /// Inserts a task directly for a specific roommate on a specific date without
+  /// touching, recalculating, or disrupting any other scheduled tasks.
+  Future<void> forceInsertAssignment({
+    required String roomId,
+    String? choreId,
+    required String title,
+    required String icon,
+    required double points,
+    required DateTime date,
+    required String assignedToUserId,
+    required String assignedToName,
+  }) async {
+    String finalChoreId = choreId ?? '';
+    if (finalChoreId.isEmpty) {
+      // Create a one-off chore document in 'chores' collection so math engine finds it
+      final newChoreRef = await _db.collection('chores').add({
+        'roomId': roomId,
+        'title': title,
+        'icon': icon,
+        'points': points,
+        'crew': 1,
+        'frequencyDays': 0,
+        'isOneOff': true,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+      finalChoreId = newChoreRef.id;
+    }
+
+    // Normalize date to midnight
+    final normDate = DateTime(date.year, date.month, date.day);
+    const List<String> weekDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+    final dayOfWeek = weekDays[normDate.weekday - 1];
+    final dayString = "${normDate.year}-${normDate.month.toString().padLeft(2, '0')}-${normDate.day.toString().padLeft(2, '0')}";
+
+    final assignmentData = {
+      'roomId': roomId,
+      'choreId': finalChoreId,
+      'choreTitle': title,
+      'choreIcon': icon,
+      'points': points,
+      'date': Timestamp.fromDate(normDate),
+      'day': dayString,
+      'dayOfWeek': dayOfWeek,
+      'assignedToUserId': assignedToUserId,
+      'assignedToName': assignedToName,
+      'isCompleted': false,
+      'disputed': false,
+      'v': 2,
+    };
+
+    await _db.collection('assignments').add(assignmentData);
+    debugPrint("Force inserted assignment for $assignedToName ($title on $dayString)");
   }
 
   Future<void> undoChore({
@@ -387,6 +546,7 @@ class ChoreService {
         dailyChores.shuffle(seededRandom);
 
         for (var chore in dailyChores) {
+          if (chore['isOneOff'] == true || (chore['frequencyDays'] ?? 0) <= 0) continue;
           int freq = chore['frequencyDays'] ?? 7;
           if (daysSinceEpoch % freq != 0) continue;
 

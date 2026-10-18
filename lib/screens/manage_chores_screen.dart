@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../services/chore_service.dart';
 import '../services/sync_service.dart';
 import '../utils/chore_icons.dart';
+import '../widgets/force_insert_task_dialog.dart';
 
 class ManageChoresScreen extends StatefulWidget {
   const ManageChoresScreen({super.key});
@@ -208,7 +209,17 @@ class _ManageChoresScreenState extends State<ManageChoresScreen> {
     if (_isLoading) return const Scaffold(body: Center(child: CircularProgressIndicator()));
 
     return Scaffold(
-      appBar: AppBar(title: const Text("Manage Chores")),
+      appBar: AppBar(
+        title: const Text("Manage Chores"),
+        actions: [
+          if (_isAdmin && _roomId != null)
+            IconButton(
+              icon: const Icon(Icons.assignment_ind),
+              tooltip: "Force Insert Task",
+              onPressed: () => ForceInsertTaskDialog.show(context, _roomId!),
+            ),
+        ],
+      ),
       floatingActionButton: _isAdmin
           ? FloatingActionButton.extended(
               onPressed: () => _showChoreDialog(),
@@ -222,7 +233,10 @@ class _ManageChoresScreenState extends State<ManageChoresScreen> {
         builder: (context, snapshot) {
           if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
           
-          final chores = snapshot.data!.docs;
+          final chores = snapshot.data!.docs.where((doc) {
+            final data = doc.data() as Map<String, dynamic>;
+            return data['isOneOff'] != true;
+          }).toList();
           
           if (chores.isEmpty) {
             return const Center(child: Text("No chores defined yet.\nTap 'Add Task' to get started!", textAlign: TextAlign.center));
