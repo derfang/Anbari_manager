@@ -358,7 +358,7 @@ class ChoreService {
         'icon': icon,
         'points': points,
         'crew': 1,
-        'frequencyDays': 0,
+        'frequencyDays': 99999, // High number prevents IntegerDivisionByZero on older clients
         'isOneOff': true,
         'createdAt': FieldValue.serverTimestamp(),
       });
