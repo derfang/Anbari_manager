@@ -663,16 +663,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   return dateA.compareTo(dateB);
                 });
 
-                // Deduplicate by choreId
-                final seenChores = <String>{};
-                myTasks = myTasks.where((doc) {
-                  final data = doc.data() as Map<String, dynamic>;
-                  final choreId = data['choreId'] as String;
-                  if (seenChores.contains(choreId)) return false;
-                  seenChores.add(choreId);
-                  return true;
-                }).toList();
-
                 // Synchronize local reminders for the entire week (at 7:00 PM for each task), Saturday summary, & Bi-weekly expense reminder
                 final List<Map<String, dynamic>> upcomingTasks = [];
                 for (final doc in myTasks) {
@@ -955,14 +945,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               // Rows for each chore
                               ...chores.map((chore) {
                                 List<Widget> cells = [];
-                                int skipDays = 0;
 
                                 for (int i = 0; i < 7; i++) {
-                                  if (skipDays > 0) {
-                                    skipDays--;
-                                    continue;
-                                  }
-
                                   DateTime currentDay = startBounds.add(Duration(days: i));
                                   final normCurrent = DateTime(currentDay.year, currentDay.month, currentDay.day);
                                   
@@ -982,21 +966,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   }
 
                                   if (activeAssigns.isNotEmpty) {
-                                    final firstData = activeAssigns.first.data() as Map<String, dynamic>;
-                                    final aEnd = firstData.containsKey('endDate') ? (firstData['endDate'] as Timestamp).toDate() : (firstData['date'] as Timestamp).toDate();
-                                    final normAEnd = DateTime(aEnd.year, aEnd.month, aEnd.day);
-                                    
-                                    int daysRemainingInWeek = 7 - i;
-                                    int daysRemainingInAssignment = normAEnd.difference(normCurrent).inDays + 1;
-                                    int flex = daysRemainingInAssignment < daysRemainingInWeek ? daysRemainingInAssignment : daysRemainingInWeek;
-                                    
-                                    skipDays = flex - 1;
-
                                     const List<String> weekDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
                                     cells.add(
                                       Container(
-                                        width: 100.0 * flex, // Multiply by flex for merged width
+                                        width: 100.0,
                                         decoration: BoxDecoration(
                                           border: Border(left: BorderSide(color: Colors.grey.shade300)),
                                         ),
