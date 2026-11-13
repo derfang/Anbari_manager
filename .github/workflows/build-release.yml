@@ -41,7 +41,14 @@ jobs:
           EOF
 
       - name: Build Split APKs
-        run: flutter build apk --release --split-per-abi
+        run: |
+          flutter build apk --release --split-per-abi --verbose || {
+            echo "::error::Flutter build failed. Showing Gradle logs:"
+            if [ -d android/.gradle ]; then
+              find android/.gradle -name "*.log" -exec cat {} +
+            fi
+            exit 1
+          }
 
       - name: Upload Android Artifacts
         uses: actions/upload-artifact@v4
