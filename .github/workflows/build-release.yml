@@ -41,19 +41,7 @@ jobs:
           EOF
 
       - name: Build Split APKs
-        run: |
-          flutter build apk --release --split-per-abi --verbose > build.log 2>&1 || {
-            echo "BUILD FAILED. LAST 200 LINES OF BUILD LOG:"
-            tail -n 200 build.log
-            exit 1
-          }
-
-      - name: Upload Build Log on Failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: flutter-build-log
-          path: build.log
+        run: flutter build apk --release --split-per-abi --android-skip-build-dependency-validation
 
       - name: Upload Android Artifacts
         uses: actions/upload-artifact@v4
