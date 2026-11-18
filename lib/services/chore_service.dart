@@ -128,6 +128,60 @@ class ChoreService {
     }
   }
 
+  /// Calculates presence weight for each non-doer roommate over the chore cycle window [cycleStart, cycleEnd].
+  /// Presence weight = daysPresent / totalCycleDays (between 0.0 and 1.0).
+  Map<String, double> _calculatePresenceWeights({
+    required List<DocumentSnapshot> candidates,
+    required List<Map<String, dynamic>> approvedAbsences,
+    required DateTime cycleStart,
+    required DateTime cycleEnd,
+  }) {
+    final normStart = DateTime(cycleStart.year, cycleStart.month, cycleStart.day);
+    final normEnd = DateTime(cycleEnd.year, cycleEnd.month, cycleEnd.day);
+    final int totalCycleDays = normEnd.difference(normStart).inDays + 1;
+    if (totalCycleDays <= 0) return {for (var c in candidates) c.id: 1.0};
+
+    final Map<String, double> weights = {};
+
+    for (var doc in candidates) {
+      final String uid = doc.id;
+      final data = doc.data() as Map<String, dynamic>;
+      
+      // If user is globally flagged as permanent absent, weight is 0
+      if (data['isAbsent'] == true) {
+        weights[uid] = 0.0;
+        continue;
+      }
+
+      // Find all approved absence windows for this user
+      final userAbsences = approvedAbsences.where((a) => a['userId'] == uid).toList();
+      
+      int absentDaysCount = 0;
+      for (int d = 0; d < totalCycleDays; d++) {
+        final currentDay = normStart.add(Duration(days: d));
+        bool isDayAbsent = false;
+        for (var absence in userAbsences) {
+          final aStart = (absence['startDate'] as Timestamp).toDate();
+          final aEnd = (absence['endDate'] as Timestamp).toDate();
+          final normAStart = DateTime(aStart.year, aStart.month, aStart.day);
+          final normAEnd = DateTime(aEnd.year, aEnd.month, aEnd.day);
+
+          if (currentDay.compareTo(normAStart) >= 0 && currentDay.compareTo(normAEnd) <= 0) {
+            isDayAbsent = true;
+            break;
+          }
+        }
+        if (isDayAbsent) absentDaysCount++;
+      }
+
+      int presentDays = totalCycleDays - absentDaysCount;
+      if (presentDays < 0) presentDays = 0;
+      weights[uid] = presentDays / totalCycleDays;
+    }
+
+    return weights;
+  }
+
   Future<void> completeChore({
     required String roomId,
     required String choreId,
@@ -145,66 +199,95 @@ class ChoreService {
         debugPrint("Chore already completed. Aborting.");
         return;
       }
-      // 1. Fetch the chore details to get its effortValue
+      // 1. Fetch the chore details to get its effortValue and frequency
       final choreDoc = await _db.collection('chores').doc(choreId).get();
       if (!choreDoc.exists) throw Exception("Chore not found");
 
-      final double effortValue = (choreDoc.data()?['points'] ?? 0)
-          .toDouble();
+      final choreData = choreDoc.data() ?? {};
+      final double effortValue = (choreData['points'] ?? 0).toDouble();
+      final int freq = (choreData['frequencyDays'] is num && choreData['frequencyDays'] > 0 && choreData['frequencyDays'] < 99999)
+          ? (choreData['frequencyDays'] as num).toInt()
+          : 1;
 
-      // 2. Fetch all users in the room
+      // 2. Determine the cycle window [cycleStart, cycleEnd]
+      DateTime taskDate = DateTime.now();
+      if (assignmentDoc.exists && assignmentDoc.data() != null) {
+        final assignData = assignmentDoc.data()!;
+        if (assignData['date'] is Timestamp) {
+          taskDate = (assignData['date'] as Timestamp).toDate();
+        }
+      }
+      final DateTime cycleEnd = DateTime(taskDate.year, taskDate.month, taskDate.day);
+      final DateTime cycleStart = cycleEnd.subtract(Duration(days: freq - 1));
+
+      // 3. Fetch all users in the room
       final usersSnapshot = await _db
           .collection('users')
           .where(Filter.or(Filter('roomId', isEqualTo: roomId), Filter('roomIds', arrayContains: roomId)))
           .get();
 
-      List<DocumentSnapshot> presentSlackers = [];
+      List<DocumentSnapshot> nonDoerCandidates = [];
       List<DocumentSnapshot> doers = [];
 
-      // 3. Separate the guys doing the work from the guys on the couch
       for (var doc in usersSnapshot.docs) {
         final data = doc.data() as Map<String, dynamic>;
-        
-        // Handle alternative room inclusion
         final List<dynamic> roomIds = data['roomIds'] ?? [];
         if (data['roomId'] != roomId && !roomIds.contains(roomId)) continue;
 
         if (doerIds.contains(doc.id)) {
           doers.add(doc);
-        } else if (data['isAbsent'] != true) {
-          presentSlackers.add(doc);
+        } else {
+          nonDoerCandidates.add(doc);
         }
       }
 
-      // Prevent dividing by zero if everyone happens to be doing the chore or absent
-      if (presentSlackers.isEmpty) {
-        throw Exception(
-          "No slackers to tax! Math engine aborted to prevent errors.",
-        );
-      }
+      // 4. Fetch approved absences for the room
+      final absencesSnapshot = await _db.collection('absences')
+          .where('roomId', isEqualTo: roomId)
+          .where('status', isEqualTo: 'approved')
+          .get();
+      final approvedAbsences = absencesSnapshot.docs.map((d) => d.data()).toList();
 
-      // 4. Calculate the zero-sum math
-      final double slackerTax =
-          (effortValue * doers.length) / presentSlackers.length;
+      // 5. Calculate presence weights for all non-doer roommates
+      final presenceWeights = _calculatePresenceWeights(
+        candidates: nonDoerCandidates,
+        approvedAbsences: approvedAbsences,
+        cycleStart: cycleStart,
+        cycleEnd: cycleEnd,
+      );
 
-      // 5. Create a WriteBatch to update everything simultaneously
+      final double totalPresenceWeight = presenceWeights.values.fold(0.0, (prev, w) => prev + w);
+
+      final double totalReward = effortValue * doers.length;
+      final Map<String, double> distributedTaxes = {};
       final batch = _db.batch();
 
-      // Reward the doers (Increments their points by the chore value)
-      for (var doer in doers) {
-        batch.update(doer.reference, {
-          'roomPoints.$roomId': FieldValue.increment(effortValue),
-        });
+      if (totalPresenceWeight > 0) {
+        // Distribute tax proportionally to each roommate's presence weight
+        for (var slacker in nonDoerCandidates) {
+          final double weight = presenceWeights[slacker.id] ?? 0.0;
+          if (weight > 0) {
+            final double userTax = totalReward * (weight / totalPresenceWeight);
+            distributedTaxes[slacker.id] = userTax;
+            batch.update(slacker.reference, {
+              'roomPoints.$roomId': FieldValue.increment(-userTax),
+            });
+          } else {
+            distributedTaxes[slacker.id] = 0.0;
+          }
+        }
+
+        // Reward the doers with full effort points
+        for (var doer in doers) {
+          batch.update(doer.reference, {
+            'roomPoints.$roomId': FieldValue.increment(effortValue),
+          });
+        }
+      } else {
+        debugPrint("All non-doers were 100% absent during cycle. No slacker tax applied.");
       }
 
-      // Tax the slackers (Decrements their points by the tax value)
-      for (var slacker in presentSlackers) {
-        batch.update(slacker.reference, {
-          'roomPoints.$roomId': FieldValue.increment(-slackerTax),
-        });
-      }
-
-      // 6. Log the history
+      // 6. Log the history with exact distributed taxes
       final historyRef = _db.collection('chore_history').doc();
       batch.set(historyRef, {
         'roomId': roomId,
@@ -213,20 +296,21 @@ class ChoreService {
         'completedBy': doerIds,
         'completedAt': FieldValue.serverTimestamp(),
         'effortValue': effortValue,
+        'taxes': distributedTaxes,
+        'cycleDays': freq,
+        'presenceWeights': presenceWeights,
       });
 
       batch.update(_db.collection('assignments').doc(assignmentId), {'isCompleted': true, 'v': 2});
 
       // 7. Execute the batch
       await batch.commit();
-      debugPrint(
-        "Zero-sum points successfully distributed!",
-      ); // FIXED: Using debugPrint
+      debugPrint("Zero-sum proportional points successfully distributed!");
 
       // 8. Recalculate next week's schedule with the new points
       await recalculateSchedule(roomId, startWeekOffset: 1, endWeekOffset: 1);
     } catch (e) {
-      debugPrint("Error processing chore math: $e"); // FIXED: Using debugPrint
+      debugPrint("Error processing chore math: $e");
       rethrow;
     } finally {
       _processingAssignments.remove(assignmentId);
@@ -234,7 +318,7 @@ class ChoreService {
   }
 
   /// Cancels a completion made by mistake without triggering a dispute or vote.
-  /// Reverts zero-sum points, cleans up history, and returns assignment to pending state.
+  /// Reverts zero-sum points using recorded history taxes, cleans up history, and returns assignment to pending state.
   Future<void> cancelSelfCompletion({
     required String roomId,
     required String choreId,
@@ -259,12 +343,28 @@ class ChoreService {
 
       final double effortValue = (choreDoc.data()?['points'] ?? 0).toDouble();
 
+      // Fetch history record to get exact taxes deducted
+      final historyQuery = await _db.collection('chore_history')
+          .where('roomId', isEqualTo: roomId)
+          .where('assignmentId', isEqualTo: assignmentId)
+          .get();
+
+      Map<String, double>? recordedTaxes;
+      if (historyQuery.docs.isNotEmpty) {
+        final historyData = historyQuery.docs.first.data();
+        if (historyData['taxes'] is Map) {
+          recordedTaxes = (historyData['taxes'] as Map).map(
+            (k, v) => MapEntry(k.toString(), (v as num).toDouble()),
+          );
+        }
+      }
+
       final usersSnapshot = await _db
           .collection('users')
           .where(Filter.or(Filter('roomId', isEqualTo: roomId), Filter('roomIds', arrayContains: roomId)))
           .get();
 
-      List<DocumentSnapshot> presentSlackers = [];
+      List<DocumentSnapshot> slackers = [];
       List<DocumentSnapshot> doers = [];
 
       for (var doc in usersSnapshot.docs) {
@@ -274,30 +374,44 @@ class ChoreService {
 
         if (doerIds.contains(doc.id)) {
           doers.add(doc);
-        } else if (data['isAbsent'] != true) {
-          presentSlackers.add(doc);
+        } else {
+          slackers.add(doc);
         }
       }
 
-      if (presentSlackers.isEmpty) {
-        throw Exception("No slackers! Math engine aborted to prevent errors.");
-      }
-
-      final double slackerTax = (effortValue * doers.length) / presentSlackers.length;
       final batch = _db.batch();
 
-      // Deduct reward from the doers
-      for (var doer in doers) {
-        batch.update(doer.reference, {
-          'roomPoints.$roomId': FieldValue.increment(-effortValue),
-        });
-      }
-
-      // Return tax to the slackers
-      for (var slacker in presentSlackers) {
-        batch.update(slacker.reference, {
-          'roomPoints.$roomId': FieldValue.increment(slackerTax),
-        });
+      if (recordedTaxes != null && recordedTaxes.isNotEmpty) {
+        // Precise reversion based on exact recorded taxes
+        for (var slacker in slackers) {
+          final double refundedTax = recordedTaxes[slacker.id] ?? 0.0;
+          if (refundedTax > 0) {
+            batch.update(slacker.reference, {
+              'roomPoints.$roomId': FieldValue.increment(refundedTax),
+            });
+          }
+        }
+        for (var doer in doers) {
+          batch.update(doer.reference, {
+            'roomPoints.$roomId': FieldValue.increment(-effortValue),
+          });
+        }
+      } else {
+        // Fallback for legacy records without taxes map
+        final presentSlackers = slackers.where((d) => (d.data() as Map<String, dynamic>)['isAbsent'] != true).toList();
+        if (presentSlackers.isNotEmpty) {
+          final double slackerTax = (effortValue * doers.length) / presentSlackers.length;
+          for (var slacker in presentSlackers) {
+            batch.update(slacker.reference, {
+              'roomPoints.$roomId': FieldValue.increment(slackerTax),
+            });
+          }
+          for (var doer in doers) {
+            batch.update(doer.reference, {
+              'roomPoints.$roomId': FieldValue.increment(-effortValue),
+            });
+          }
+        }
       }
 
       // Mark assignment uncompleted and NOT disputed
@@ -308,10 +422,6 @@ class ChoreService {
       });
 
       // Delete history log for this assignment
-      final historyQuery = await _db.collection('chore_history')
-          .where('roomId', isEqualTo: roomId)
-          .where('assignmentId', isEqualTo: assignmentId)
-          .get();
       for (var h in historyQuery.docs) {
         batch.delete(h.reference);
       }
@@ -325,7 +435,7 @@ class ChoreService {
       }
 
       await batch.commit();
-      debugPrint("Self-completion cancelled: zero-sum points reverted and status cleared.");
+      debugPrint("Self-completion cancelled: proportional points reverted and status cleared.");
 
       // Recalculate next week's schedule with the reverted points
       await recalculateSchedule(roomId, startWeekOffset: 1, endWeekOffset: 1);
@@ -413,47 +523,75 @@ class ChoreService {
 
       final double effortValue = (choreDoc.data()?['points'] ?? 0).toDouble();
 
+      // Fetch history record to get exact taxes deducted
+      final historyQuery = await _db.collection('chore_history')
+          .where('roomId', isEqualTo: roomId)
+          .where('assignmentId', isEqualTo: assignmentId)
+          .get();
+
+      Map<String, double>? recordedTaxes;
+      if (historyQuery.docs.isNotEmpty) {
+        final historyData = historyQuery.docs.first.data();
+        if (historyData['taxes'] is Map) {
+          recordedTaxes = (historyData['taxes'] as Map).map(
+            (k, v) => MapEntry(k.toString(), (v as num).toDouble()),
+          );
+        }
+      }
+
       final usersSnapshot = await _db
           .collection('users')
           .where(Filter.or(Filter('roomId', isEqualTo: roomId), Filter('roomIds', arrayContains: roomId)))
           .get();
 
-      List<DocumentSnapshot> presentSlackers = [];
+      List<DocumentSnapshot> slackers = [];
       List<DocumentSnapshot> doers = [];
 
       for (var doc in usersSnapshot.docs) {
         final data = doc.data() as Map<String, dynamic>;
-        
-        // Handle alternative room inclusion
         final List<dynamic> roomIds = data['roomIds'] ?? [];
         if (data['roomId'] != roomId && !roomIds.contains(roomId)) continue;
 
         if (doerIds.contains(doc.id)) {
           doers.add(doc);
-        } else if (data['isAbsent'] != true) {
-          presentSlackers.add(doc);
+        } else {
+          slackers.add(doc);
         }
       }
 
-      if (presentSlackers.isEmpty) {
-        throw Exception("No slackers! Math engine aborted to prevent errors.");
-      }
-
-      final double slackerTax = (effortValue * doers.length) / presentSlackers.length;
       final batch = _db.batch();
 
-      // Un-reward the doers
-      for (var doer in doers) {
-        batch.update(doer.reference, {
-          'roomPoints.$roomId': FieldValue.increment(-effortValue),
-        });
-      }
-
-      // Un-tax the slackers
-      for (var slacker in presentSlackers) {
-        batch.update(slacker.reference, {
-          'roomPoints.$roomId': FieldValue.increment(slackerTax),
-        });
+      if (recordedTaxes != null && recordedTaxes.isNotEmpty) {
+        // Precise reversion based on exact recorded taxes
+        for (var slacker in slackers) {
+          final double refundedTax = recordedTaxes[slacker.id] ?? 0.0;
+          if (refundedTax > 0) {
+            batch.update(slacker.reference, {
+              'roomPoints.$roomId': FieldValue.increment(refundedTax),
+            });
+          }
+        }
+        for (var doer in doers) {
+          batch.update(doer.reference, {
+            'roomPoints.$roomId': FieldValue.increment(-effortValue),
+          });
+        }
+      } else {
+        // Fallback for legacy records without taxes map
+        final presentSlackers = slackers.where((d) => (d.data() as Map<String, dynamic>)['isAbsent'] != true).toList();
+        if (presentSlackers.isNotEmpty) {
+          final double slackerTax = (effortValue * doers.length) / presentSlackers.length;
+          for (var slacker in presentSlackers) {
+            batch.update(slacker.reference, {
+              'roomPoints.$roomId': FieldValue.increment(slackerTax),
+            });
+          }
+          for (var doer in doers) {
+            batch.update(doer.reference, {
+              'roomPoints.$roomId': FieldValue.increment(-effortValue),
+            });
+          }
+        }
       }
 
       batch.update(_db.collection('assignments').doc(assignmentId), {'isCompleted': false, 'v': 2});
